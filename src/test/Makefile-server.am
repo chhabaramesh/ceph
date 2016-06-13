@@ -51,6 +51,11 @@ ceph_test_objectstore_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
 ceph_test_objectstore_CXXFLAGS = $(UNITTEST_CXXFLAGS)
 bin_DEBUGPROGRAMS += ceph_test_objectstore
 
+kv_test_SOURCES = test/objectstore/kv_test.cc
+kv_test_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
+kv_test_CXXFLAGS = $(UNITTEST_CXXFLAGS)
+bin_DEBUGPROGRAMS += kv_test 
+
 ceph_test_keyvaluedb_SOURCES = test/objectstore/test_kv.cc
 ceph_test_keyvaluedb_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
 ceph_test_keyvaluedb_CXXFLAGS = $(UNITTEST_CXXFLAGS)

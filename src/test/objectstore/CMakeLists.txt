@@ -26,6 +26,22 @@ target_link_libraries(ceph_test_objectstore
 install(TARGETS ceph_test_objectstore
   DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+#kv_test
+add_executable(kv_test
+  kv_test.cc
+  )
+set_target_properties(kv_test PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(kv_test
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  )
+
 #ceph_test_keyvaluedb
 add_executable(ceph_test_keyvaluedb
   test_kv.cc

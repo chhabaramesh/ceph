@@ -82,6 +82,10 @@ TEST(Buffer, constructors) {
     history_alloc_bytes += len;
     history_alloc_num++;
     EXPECT_EQ(0, ::memcmp(clone.c_str(), ptr.c_str(), len));
+		(ptr.c_str())[0] = 'A';
+		(clone.c_str())[0] = 'B';
+
+		EXPECT_EQ(false, (ptr.c_str())[0] ==  (clone.c_str())[0]);
   }
   //
   // buffer::create_static
@@ -981,6 +985,26 @@ TEST(BufferListIterator, operator_assign) {
   EXPECT_EQ('B', *j);
 }
 
+TEST(BufferListTry, get_off) {
+  bufferlist bl;
+  bl.append("ABC", 3);
+	bufferptr bp(buffer::copy(bl.c_str(), bl.length()));
+	EXPECT_EQ(bp.c_str()[0], bl.c_str()[0]);
+
+	char *str = (char *) malloc(10);
+	*str = 'R';
+	bufferptr bp1(buffer::copy(str, 10));
+	*str = 'X';
+	free(str);
+	EXPECT_EQ((bp1.c_str())[0], 'R');
+	str = (char *) malloc(10);
+	*str = 'P';
+	bufferptr bp2(str, 10);
+	*str = 'X';
+	free(str);
+	EXPECT_EQ((bp2.c_str())[0], 'P');
+}
+
 TEST(BufferListIterator, get_off) {
   bufferlist bl;
   bl.append("ABC", 3);
@@ -1801,11 +1825,13 @@ TEST(BufferList, push_back) {
     bl.append('A');
     bufferptr ptr(len);
     ptr.c_str()[0] = 'B';
-    bl.push_back(ptr);
+    bl.push_back(ptr.clone());
+    //bl.push_back(ptr);
+    ptr.c_str()[0] = 'C';
     EXPECT_EQ((unsigned)(1 + len), bl.length());
     EXPECT_EQ((unsigned)2, bl.get_num_buffers());
     EXPECT_EQ('B', bl.back()[0]);
-    EXPECT_EQ(ptr.get_raw(), bl.back().get_raw());
+//    EXPECT_EQ(clone.get_raw(), bl.back().get_raw());
   }
   //
   // void push_back(raw *r)

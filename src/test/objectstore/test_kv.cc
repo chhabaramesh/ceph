@@ -83,6 +83,33 @@ TEST_P(KVTest, OpenCloseReopenClose) {
   fini();
 }
 
+TEST_P(KVTest, OpenWriteRead) {
+  ASSERT_EQ(0, db->create_and_open(cout));
+  {
+    KeyValueDB::Transaction t = db->get_transaction();
+    bufferlist value;
+    value.append("value");
+    t->set("prefix", "key", value);
+		value.clear();
+    value.append("value2");
+    t->set("prefix", "key2", value);
+		value.clear();
+    value.append("value3");
+    t->set("prefix", "key3", value);
+    db->submit_transaction_sync(t);
+
+    bufferlist v1, v2;
+    ASSERT_EQ(0, db->get("prefix", "key", &v1));
+    ASSERT_EQ(v1.length(), 5u);
+		ASSERT_EQ(std::string(v1.c_str()), std::string("value"));
+    ASSERT_EQ(0, db->get("prefix", "key2", &v2));
+    ASSERT_EQ(v2.length(), 6u);
+		ASSERT_EQ(std::string(v2.c_str()), std::string("value2"));
+  }
+  fini();
+}
+
+#if 1
 TEST_P(KVTest, PutReopen) {
   ASSERT_EQ(0, db->create_and_open(cout));
   {
@@ -112,7 +139,7 @@ TEST_P(KVTest, PutReopen) {
     db->submit_transaction_sync(t);
   }
   fini();
-
+#if 1
   init();
   ASSERT_EQ(0, db->open(cout));
   {
@@ -123,8 +150,10 @@ TEST_P(KVTest, PutReopen) {
     ASSERT_EQ(-ENOENT, db->get("prefix", "key3", &v3));
   }
   fini();
+#endif
 }
-
+#endif 
+#if 1
 TEST_P(KVTest, BenchCommit) {
   int n = 1024;
   ASSERT_EQ(0, db->create_and_open(cout));
@@ -168,6 +197,7 @@ struct AppendMOP : public KeyValueDB::MergeOperator {
     const char *ldata, size_t llen,
     const char *rdata, size_t rlen,
     std::string *new_value) {
+
     *new_value = std::string(ldata, llen) + std::string(rdata, rlen);
   }
   // We use each operator name and each prefix to construct the
@@ -222,12 +252,13 @@ TEST_P(KVTest, Merge) {
   }
   fini();
 }
-
+#endif
 
 INSTANTIATE_TEST_CASE_P(
   KeyValueDB,
   KVTest,
-  ::testing::Values("leveldb", "rocksdb"));
+  //::testing::Values("leveldb", "rocksdb"));
+  ::testing::Values("memdb"));
 
 #else
 
