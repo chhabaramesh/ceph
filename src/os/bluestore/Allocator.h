@@ -71,6 +71,7 @@ public:
   virtual void init_rm_free(uint64_t offset, uint64_t length) = 0;
 
   virtual uint64_t get_free() = 0;
+  virtual bool allows_parallel_submission() = 0;
 
   virtual void shutdown() = 0;
   static Allocator *create(string type, int64_t size, int64_t block_size);

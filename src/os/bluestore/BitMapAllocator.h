@@ -55,6 +55,11 @@ public:
   uint64_t get_free();
 
   void dump(std::ostream& out);
+  bool allows_parallel_submission()
+  {
+    return true;
+  };
+
 
   void init_add_free(uint64_t offset, uint64_t length);
   void init_rm_free(uint64_t offset, uint64_t length);
