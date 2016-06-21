@@ -1393,6 +1393,7 @@ private:
   uint64_t max_alloc_size; ///< maximum allocation unit (power of 2)
 
   bool sync_wal_apply;	  ///< see config option bluestore_sync_wal_apply
+  bool parallel_tx_apply;
 
   // compression options
   enum CompressionMode {
@@ -1483,6 +1484,8 @@ private:
   void _txc_finish_io(TransContext *txc);
   void _txc_finish_kv(TransContext *txc);
   void _txc_finish(TransContext *txc);
+
+  void apply_kv_tx(TransContext *txc);
 
   void _osr_reap_done(OpSequencer *osr);
 

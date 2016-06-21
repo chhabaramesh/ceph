@@ -1405,7 +1405,6 @@ BlueStore::ExtentMap::ExtentMap(Onode *o)
       g_conf ? g_conf->bluestore_extent_map_inline_shard_prealloc_size : 4096) {
 }
 
-
 bool BlueStore::ExtentMap::update(Onode *o, KeyValueDB::Transaction t,
 				  bool force)
 {
@@ -2181,7 +2180,8 @@ BlueStore::BlueStore(CephContext *cct, const string& path)
     logger(NULL),
     debug_read_error_lock("BlueStore::debug_read_error_lock"),
     csum_type(bluestore_blob_t::CSUM_CRC32C),
-    sync_wal_apply(cct->_conf->bluestore_sync_wal_apply)
+    sync_wal_apply(cct->_conf->bluestore_sync_wal_apply),
+    parallel_tx_apply(cct->_conf->bluestore_submit_parallel_transaction)
 {
   _init_logger();
   g_ceph_context->_conf->add_observer(this);
@@ -3543,8 +3543,11 @@ int BlueStore::mkfs()
     goto out_close_fm;
 
   // check for parallel transaction support else bail out
-  if (!(g_conf->bluestore_submit_parallel_transaction && alloc->allows_parallel_submission()))
+  if (g_conf->bluestore_submit_parallel_transaction && ! alloc->allows_parallel_submission()) {
+     derr << __func__ << " parallel tx: " << g_conf->bluestore_submit_parallel_transaction  << dendl;
+     derr << __func__ << " allows parallel tx: " << g_conf->bluestore_submit_parallel_transaction  << dendl;
      goto out_close_fm;
+  }
 
   r = write_meta("kv_backend", g_conf->bluestore_kvbackend);
   if (r < 0)
@@ -4320,6 +4323,9 @@ void BlueStore::_sync()
     dout(20) << " waiting for kv to commit" << dendl;
     kv_sync_cond.wait(l);
   }
+  // when we don't go through kv_sync_thread
+  // need tp wait for all the aio cb threads to finish
+  // does flush take care of it?
 
   dout(10) << __func__ << " done" << dendl;
 }
@@ -5838,7 +5844,9 @@ void BlueStore::_txc_state_proc(TransContext *txc)
 	int r = db->submit_transaction_sync(txc->t);
 	assert(r == 0);
       }
-      {
+      if (parallel_tx_apply) {
+        apply_kv_tx(txc);
+      } else {
 	std::lock_guard<std::mutex> l(kv_lock);
 	kv_queue.push_back(txc);
 	kv_cond.notify_one();
@@ -6058,7 +6066,7 @@ void BlueStore::_txc_finish(TransContext *txc)
 
   OpSequencerRef osr = txc->osr;
   {
-    std::lock_guard<std::mutex> l(osr->qlock);
+    //std::lock_guard<std::mutex> l(osr->qlock);
     txc->state = TransContext::STATE_DONE;
   }
 
@@ -6067,10 +6075,13 @@ void BlueStore::_txc_finish(TransContext *txc)
 
 void BlueStore::_osr_reap_done(OpSequencer *osr)
 {
+  if (!parallel_tx_apply) {
+    osr->qlock.lock();
+  }
+  dout(20) << __func__ << " osr " << osr << dendl;
   CollectionRef c;
 
   {
-    std::lock_guard<std::mutex> l(osr->qlock);
     dout(20) << __func__ << " osr " << osr << dendl;
     while (!osr->q.empty()) {
       TransContext *txc = &osr->q.front();
@@ -6097,6 +6108,9 @@ void BlueStore::_osr_reap_done(OpSequencer *osr)
     c->cache->trim(
       g_conf->bluestore_onode_cache_size,
       g_conf->bluestore_buffer_cache_size);
+  }
+  if (!parallel_tx_apply) {
+     osr->qlock.unlock();
   }
 }
 
@@ -6299,6 +6313,97 @@ void BlueStore::_kv_sync_thread()
       l.lock();
     }
   }
+  dout(10) << __func__ << " finish" << dendl;
+}
+void BlueStore::apply_kv_tx(TransContext* txc)
+{
+  dout(10) << __func__ << " start prallel tx submitions: " << txc << dendl;
+  utime_t start = ceph_clock_now(NULL);
+
+   alloc->commit_start();
+
+    // flush/barrier on block device
+    bdev->flush();
+
+    uint64_t high_nid = 0, high_blobid = 0;
+    if (!g_conf->bluestore_sync_transaction &&
+        !g_conf->bluestore_sync_submit_transaction) {
+        _txc_finalize_kv(txc, txc->t);
+        if (txc->last_nid > high_nid) {
+          high_nid = txc->last_nid;
+        }
+        if (txc->last_blobid > high_blobid) {
+          high_blobid = txc->last_blobid;
+        }
+        std::lock_guard<std::mutex> l(id_lock);
+        if (high_nid + g_conf->bluestore_nid_prealloc/2 > nid_max) {
+          nid_max = high_nid + g_conf->bluestore_nid_prealloc;
+          bufferlist bl;
+          ::encode(nid_max, bl);
+          txc->t->set(PREFIX_SUPER, "nid_max", bl);
+          dout(10) << __func__ << " nid_max now " << nid_max << dendl;
+        }
+        if (high_blobid + g_conf->bluestore_blobid_prealloc/2 > blobid_max) {
+          blobid_max = high_blobid + g_conf->bluestore_blobid_prealloc;
+          bufferlist bl;
+          ::encode(blobid_max, bl);
+          txc->t->set(PREFIX_SUPER, "blobid_max", bl);
+          dout(10) << __func__ << " blobid_max now " << blobid_max << dendl;
+        }
+        int r = db->submit_transaction(txc->t);
+        assert(r == 0);
+    }
+
+    // one final transaction to force a sync
+    KeyValueDB::Transaction t = db->get_transaction();
+
+    vector<bluestore_pextent_t> bluefs_gift_extents;
+    if (bluefs) {
+      int r = _balance_bluefs_freespace(&bluefs_gift_extents);
+      assert(r >= 0);
+      if (r > 0) {
+        for (auto& p : bluefs_gift_extents) {
+          bluefs_extents.insert(p.offset, p.length);
+        }
+        bufferlist bl;
+        ::encode(bluefs_extents, bl);
+        dout(10) << __func__ << " bluefs_extents now 0x" << std::hex
+                 << bluefs_extents << std::dec << dendl;
+        t->set(PREFIX_SUPER, "bluefs_extents", bl);
+      }
+    }
+
+    // cleanup sync wal keys
+    for (std::deque<TransContext *>::iterator it = wal_cleaning.begin();
+          it != wal_cleaning.end();
+          ++it) {
+      bluestore_wal_transaction_t& wt =*(*it)->wal_txn;
+      // kv metadata updates
+      _txc_finalize_kv(*it, t);
+      // cleanup the wal
+      string key;
+      get_wal_key(wt.seq, &key);
+      t->rm_single_key(PREFIX_WAL, key);
+    }
+    int r = db->submit_transaction_sync(t);
+    assert(r == 0);
+
+    utime_t finish = ceph_clock_now(NULL);
+    utime_t dur = finish - start;
+    dout(20) << __func__ << " committed " << txc << " in " << dur << dendl;
+    _txc_state_proc(txc);
+
+    alloc->commit_finish();
+
+    // this is as good a place as any ...
+    _reap_collections();
+
+    if (bluefs) {
+      if (!bluefs_gift_extents.empty()) {
+        _commit_bluefs_freespace(bluefs_gift_extents);
+      }
+    }
+
   dout(10) << __func__ << " finish" << dendl;
 }
 

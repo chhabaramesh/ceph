@@ -919,7 +919,7 @@ OPTION(bdev_aio, OPT_BOOL, true)
 OPTION(bdev_aio_poll_ms, OPT_INT, 250)  // milliseconds
 OPTION(bdev_aio_max_queue_depth, OPT_INT, 32)
 OPTION(bdev_block_size, OPT_INT, 4096)
-OPTION(bdev_num_callback_threads, OPT_INT, 5) // number of aio call back threads
+OPTION(bdev_num_callback_threads, OPT_INT, 2) // number of aio call back threads
 
 // if yes, osd will unbind all NVMe devices from kernel driver and bind them
 // to the uio_pci_generic driver. The purpose is to prevent the case where
@@ -1001,6 +1001,7 @@ OPTION(bluestore_sync_transaction, OPT_BOOL, false)  // perform kv txn synchrono
 OPTION(bluestore_sync_submit_transaction, OPT_BOOL, false)
 OPTION(bluestore_submit_parallel_transaction, OPT_BOOL, false) // Allocator should suuport the parallel tx submission, only bitmap does right now
 OPTION(bluestore_sync_wal_apply, OPT_BOOL, true)     // perform initial wal work synchronously (possibly in combination with aio so we only *queue* ios)
+OPTION(bluestore_kv_sync_threads, OPT_INT, 4)
 OPTION(bluestore_wal_threads, OPT_INT, 4)
 OPTION(bluestore_wal_thread_timeout, OPT_INT, 30)
 OPTION(bluestore_wal_thread_suicide_timeout, OPT_INT, 120)
