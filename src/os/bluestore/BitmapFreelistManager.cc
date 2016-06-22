@@ -176,6 +176,7 @@ void BitmapFreelistManager::enumerate_reset()
 {
   std::lock_guard<std::mutex> l(lock);
   enumerate_offset = 0;
+  enumerate_bl_pos = 0;
   enumerate_bl.clear();
 }
 
@@ -214,7 +215,7 @@ bool BitmapFreelistManager::enumerate_next(uint64_t *offset, uint64_t *length)
   std::lock_guard<std::mutex> l(lock);
 
   // initial base case is a bit awkward
-  if (enumerate_offset == 0) {
+  if (enumerate_offset == 0 && enumerate_bl_pos <= 0) {
     dout(10) << __func__ << " start" << dendl;
     enumerate_p = kvdb->get_iterator(bitmap_prefix);
     enumerate_p->lower_bound(string());
