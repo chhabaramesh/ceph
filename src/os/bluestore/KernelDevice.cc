@@ -42,9 +42,13 @@ KernelDevice::KernelDevice(aio_callback_t cb, void *cbpriv)
     aio_callback(cb),
     aio_callback_priv(cbpriv),
     aio_stop(false),
-    aio_thread(this),
+    //aio_thread(this),
     injecting_crash(0)
 {
+  for (int i=0; i < g_conf->bdev_num_callback_threads; i++) {
+      AioCompletionThread *t = new AioCompletionThread(this);
+      aiocb_threads.push_back(t);
+  }
   zeros = buffer::create_page_aligned(1048576);
   zeros.zero();
   rotational = true;
@@ -216,6 +220,11 @@ int KernelDevice::flush()
   return r;
 }
 
+void KernelDevice::do_create(AioCompletionThread &t)
+{
+	t.create("bstore_aio");
+}
+
 int KernelDevice::_aio_start()
 {
   if (aio) {
@@ -225,9 +234,16 @@ int KernelDevice::_aio_start()
       derr << __func__ << " failed: " << cpp_strerror(r) << dendl;
       return r;
     }
-    aio_thread.create("bstore_aio");
+    for (std::vector<AioCompletionThread*>::iterator it = aiocb_threads.begin() ; it != aiocb_threads.end(); ++it) {
+        (*it)->create("bstore_aio");
+    }
   }
   return 0;
+}
+
+void KernelDevice::do_join(AioCompletionThread &t)
+{
+	t.join();
 }
 
 void KernelDevice::_aio_stop()
@@ -235,7 +251,9 @@ void KernelDevice::_aio_stop()
   if (aio) {
     dout(10) << __func__ << dendl;
     aio_stop = true;
-    aio_thread.join();
+    for (std::vector<AioCompletionThread*>::iterator it = aiocb_threads.begin() ; it != aiocb_threads.end(); ++it) {
+        (*it)->join();
+    }
     aio_stop = false;
     aio_queue.shutdown();
   }

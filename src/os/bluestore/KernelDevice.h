@@ -49,13 +49,16 @@ class KernelDevice : public BlockDevice {
       bdev->_aio_thread();
       return NULL;
     }
-  } aio_thread;
+  };
 
+  std::vector <AioCompletionThread *> aiocb_threads;
   std::atomic_int injecting_crash;
 
   void _aio_thread();
   int _aio_start();
   void _aio_stop();
+  void do_create(AioCompletionThread &t);
+  void do_join(AioCompletionThread &t);
 
   void _aio_log_start(IOContext *ioc, uint64_t offset, uint64_t length);
   void _aio_log_finish(IOContext *ioc, uint64_t offset, uint64_t length);
