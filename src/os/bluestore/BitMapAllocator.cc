@@ -237,8 +237,15 @@ int BitMapAllocator::release(
   dout(10) << __func__ << " 0x"
            << std::hex << offset << "~" << length << std::dec
            << dendl;
+
+#if 0
+
   m_uncommitted.insert(offset, length);
   m_num_uncommitted += length;
+#else
+  
+  insert_free(offset, length);
+#endif
   return 0;
 }
 
@@ -328,6 +335,7 @@ void BitMapAllocator::shutdown()
 
 void BitMapAllocator::commit_start()
 {
+  return;
   std::lock_guard<std::mutex> l(m_lock);
 
   dout(10) << __func__ << " instance " << (uint64_t) this
@@ -342,6 +350,7 @@ void BitMapAllocator::commit_start()
 
 void BitMapAllocator::commit_finish()
 {
+  return;
   std::lock_guard<std::mutex> l(m_lock);
   dout(10) << __func__ << " instance " << (uint64_t) this
            << " released " << m_num_committing

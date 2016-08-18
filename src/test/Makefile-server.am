@@ -81,6 +81,11 @@ unittest_alloc_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
 unittest_alloc_CXXFLAGS = $(UNITTEST_CXXFLAGS)
 check_TESTPROGRAMS += unittest_alloc
 
+unittest_alloc_perf_SOURCES = test/objectstore/alloc_perf.cc
+unittest_alloc_perf_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
+unittest_alloc_perf_CXXFLAGS = $(UNITTEST_CXXFLAGS)
+check_TESTPROGRAMS += unittest_alloc_perf
+
 unittest_bluestore_types_SOURCES = test/objectstore/test_bluestore_types.cc
 unittest_bluestore_types_LDADD = $(LIBOS) $(UNITTEST_LDADD) $(CEPH_GLOBAL)
 unittest_bluestore_types_CXXFLAGS = $(UNITTEST_CXXFLAGS)

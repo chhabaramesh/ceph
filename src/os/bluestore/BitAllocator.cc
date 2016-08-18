@@ -186,6 +186,35 @@ bool BmapEntry::check_n_set_bit(int bit)
   return res;
 }
 
+int BmapEntry:: find_first_one(int offset)
+{
+  uint64_t bits = m_bits << offset;
+  if (bits == BmapEntry::full_bmask()) {
+    return 0;
+  }   
+
+  if (bits == BmapEntry::empty_bmask()) {
+    return -1; 
+  }   
+  return check_lead_0s(bits); 
+}
+
+int BmapEntry:: find_first_zero(int offset) 
+{
+  uint64_t bits = m_bits << offset;
+
+  if (bits == BmapEntry::empty_bmask()) {
+    return offset;
+  }   
+
+  if (bits == BmapEntry::full_bmask()) {
+    return -1; 
+  }   
+
+  return check_lead_0s(~bits) + offset; 
+}
+
+
 /*
  * Find N cont free bits in BitMap starting from an offset.
  *
@@ -193,9 +222,6 @@ bool BmapEntry::check_n_set_bit(int bit)
  */
 int BmapEntry::find_n_cont_bits(int start_offset, int64_t num_bits)
 {
-  int count = 0;
-  int i = 0;
-
   if (num_bits == 0) {
     return 0;
   }
@@ -204,24 +230,29 @@ int BmapEntry::find_n_cont_bits(int start_offset, int64_t num_bits)
     return 0;
   }
 
-  for (i = start_offset; i < BmapEntry::size() && count < num_bits; i++) {
-    if (!check_n_set_bit(i)) {
-      break;
-    }
-    count++;
+  /*
+   * Find next one and see if we have enough 0s before that.
+   */
+  int count = 0;
+  int bit_num = find_first_one(start_offset);
+  if (bit_num == -1) {
+    count = MIN(num_bits, BmapEntry::size() - start_offset);
+  } else {
+    count = MIN(num_bits, bit_num);
   }
 
+  set_bits(start_offset, count);
   return count;
 }
 
 /*
- * Find N free bits starting search from an given offset.
- *
- * Returns number of bits found, start bit and end of
- * index next to bit where our search ended + 1.
- */
+* Find N free bits starting search from an given offset.
+*
+* Returns number of bits found, start bit and end of
+* index next to bit where our search ended + 1.
+*/
 int BmapEntry::find_n_free_bits(int start_idx, int64_t max_bits,
-         int *free_bit, int *end_idx)
+int *free_bit, int *end_idx)
 {
   int i = 0;
   int count = 0;
@@ -239,21 +270,11 @@ int BmapEntry::find_n_free_bits(int start_idx, int64_t max_bits,
     *end_idx = BmapEntry::size();
     return 0;
   }
+  i = find_first_zero(start_idx);  
+  debug_assert(i != -1);
+  *free_bit = i;
 
-  /*
-   * Do a serial scan on bitmap.
-   */
-  for (i = start_idx; i < BmapEntry::size(); i++) {
-    if (check_n_set_bit(i)) {
-      /*
-       * Found first free bit
-       */
-      *free_bit = i;
-      count++;
-      break;
-    }
-  }
-  count += find_n_cont_bits(i + 1, max_bits - 1);
+  count = find_n_cont_bits(i, max_bits);
 
   (*end_idx) = i + count;
   return count;
@@ -912,7 +933,7 @@ int64_t BitMapAreaIN::alloc_blocks(bool wait, int64_t num_blocks,
 
   unreserve(num_blocks, allocated);
   debug_assert((get_used_blocks() <= m_total_blocks));
-  debug_assert(is_allocated(*start_block, allocated));
+ // debug_assert(is_allocated(*start_block, allocated));
 
 exit:
   unlock();
@@ -1030,7 +1051,7 @@ void BitMapAreaIN::free_blocks(int64_t start_block, int64_t num_blocks)
     return;
   }
   lock_shared();
-  debug_assert(is_allocated(start_block, num_blocks));
+//  debug_assert(is_allocated(start_block, num_blocks));
 
   free_blocks_int(start_block, num_blocks);
   (void) sub_used_blocks(num_blocks);
@@ -1413,7 +1434,7 @@ int64_t BitAllocator::alloc_blocks_res(int64_t num_blocks, int64_t *start_block)
     }
   }
 
-  debug_assert(is_allocated(*start_block, allocated));
+//  debug_assert(is_allocated(*start_block, allocated));
   unreserve(num_blocks, allocated);
 
   serial_unlock();
@@ -1497,7 +1518,7 @@ void BitAllocator::free_blocks(int64_t start_block, int64_t num_blocks)
   }
 
   lock_shared();
-  debug_assert(is_allocated(start_block, num_blocks));
+//  debug_assert(is_allocated(start_block, num_blocks));
 
   free_blocks_int(start_block, num_blocks);
   (void) sub_used_blocks(num_blocks);

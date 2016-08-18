@@ -5126,6 +5126,7 @@ void BlueStore::_txc_finalize_kv(TransContext *txc, KeyValueDB::Transaction t)
     for (interval_set<uint64_t>::iterator p = txc->released.begin();
 	 p != txc->released.end();
 	 ++p) {
+	// do not add to alloc list
       alloc->release(p.get_start(), p.get_len());
     }
   }

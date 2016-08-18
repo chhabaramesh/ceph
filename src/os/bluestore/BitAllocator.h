@@ -132,6 +132,7 @@ public:
 };
 
 typedef unsigned long bmap_t;
+#define check_lead_0s __builtin_clzl
 
 class BmapEntry {
 
@@ -158,6 +159,8 @@ public:
   void clear_bits(int offset, int num_bits);
   void set_bits(int offset, int num_bits);
   bool check_n_set_bit(int bit);
+  int find_first_zero(int offset); 
+  int find_first_one(int offset); 
   bool check_bit(int bit);
   bool is_allocated(int64_t start_bit, int64_t num_bits);
 
