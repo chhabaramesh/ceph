@@ -1,0 +1,17 @@
+[global]
+#logging
+#write_iops_log=write_iops_log
+#write_bw_log=write_bw_log
+#write_lat_log=write_lat_log
+ioengine=rbd
+clientname=admin
+pool=rbd
+rbdname=test
+rw=randwrite
+bs=4k
+
+[rbd_iodepth32]
+iodepth=1
+runtime=1200
+time_based
+numjobs=64

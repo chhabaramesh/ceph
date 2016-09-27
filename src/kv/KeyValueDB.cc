@@ -47,6 +47,10 @@ KeyValueDB *KeyValueDB::create(CephContext *cct, const string& type,
     cct->check_experimental_feature_enabled("memdb")) {
     return new MemDB(cct, dir, b_w, p);
   }
+  if (type == "rocksdb" &&
+      cct->check_experimental_feature_enabled("rocksdb")) {
+    return new RocksDBStore(cct, dir, p);
+  }
   return NULL;
 }
 
