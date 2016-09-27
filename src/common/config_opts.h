@@ -971,6 +971,7 @@ OPTION(bluestore_compression, OPT_STR, "none")  // force|aggressive|passive|none
 OPTION(bluestore_compression_algorithm, OPT_STR, "snappy")
 OPTION(bluestore_compression_min_blob_size, OPT_U32, 256*1024)
 OPTION(bluestore_compression_max_blob_size, OPT_U32, 4*1024*1024)
+OPTION(kvdb_bypass_write, OPT_BOOL, false)
 /*
  * Require the net gain of compression at least to be at this ratio,
  * otherwise we don't compress.
@@ -1240,7 +1241,7 @@ OPTION(rbd_mirroring_resync_after_disconnect, OPT_BOOL, false) // automatically 
  * affected by rbd_default_order.
  */
 OPTION(rbd_default_format, OPT_INT, 2)
-OPTION(rbd_default_order, OPT_INT, 22)
+OPTION(rbd_default_order, OPT_INT, 18)
 OPTION(rbd_default_stripe_count, OPT_U64, 0) // changing requires stripingv2 feature
 OPTION(rbd_default_stripe_unit, OPT_U64, 0) // changing to non-object size requires stripingv2 feature
 OPTION(rbd_default_features, OPT_INT, 61)   // only applies to format 2 images

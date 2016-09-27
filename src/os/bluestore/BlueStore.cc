@@ -3077,6 +3077,7 @@ int BlueStore::_open_db(bool create)
   db = KeyValueDB::create(g_ceph_context,
 			  kv_backend,
 			  fn,
+        g_conf->kvdb_bypass_write,
 			  static_cast<void*>(env));
   if (!db) {
     derr << __func__ << " error creating db" << dendl;
@@ -5794,6 +5795,7 @@ void BlueStore::_txc_update_store_statfs(TransContext *txc)
 
 void BlueStore::_txc_state_proc(TransContext *txc)
 {
+  
   while (true) {
     dout(10) << __func__ << " txc " << txc
 	     << " " << txc->get_state_name() << dendl;
@@ -5803,6 +5805,7 @@ void BlueStore::_txc_state_proc(TransContext *txc)
       if (txc->ioc.has_aios()) {
 	txc->state = TransContext::STATE_AIO_WAIT;
 	_txc_aio_submit(txc);
+//			txc->state_stats.trans_state_stats(TransContext::STATE_PREPARE, TransContext::STATE_AIO_WAIT);
 	return;
       }
       // ** fall-thru **
@@ -5850,7 +5853,14 @@ void BlueStore::_txc_state_proc(TransContext *txc)
 	if (sync_wal_apply) {
 	  _wal_apply(txc);
 	} else {
-	  wal_wq.queue(txc);
+
+		wal_wq.queue(txc);
+
+		if (_wal_queue_op > 2000) {
+			dout(1) << __func__ << "Wal queue length = " << wal_wq._q_size() << dendl;
+			_wal_queue_op = 0;
+		}
+		_wal_queue_op++;
 	}
 	return;
       }
@@ -6147,9 +6157,17 @@ void BlueStore::_kv_sync_thread()
 {
   dout(10) << __func__ << " start" << dendl;
   std::unique_lock<std::mutex> l(kv_lock);
+	int  kv_queue_printed = 0;
+
   while (true) {
     assert(kv_committing.empty());
     assert(wal_cleaning.empty());
+		if (kv_queue_printed > 2000) {
+			dout(1) << __func__ << "Kv queue length = " << kv_queue.size() << dendl;
+			kv_queue_printed = 0;
+		}
+		kv_queue_printed++;
+
     if (kv_queue.empty() && wal_cleanup_queue.empty()) {
       if (kv_stop)
 	break;
@@ -6160,6 +6178,9 @@ void BlueStore::_kv_sync_thread()
     } else {
       dout(20) << __func__ << " committing " << kv_queue.size()
 	       << " cleaning " << wal_cleanup_queue.size() << dendl;
+
+
+
       kv_committing.swap(kv_queue);
       wal_cleaning.swap(wal_cleanup_queue);
       utime_t start = ceph_clock_now(NULL);

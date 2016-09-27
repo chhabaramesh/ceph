@@ -38,6 +38,16 @@
 
 #include "bluestore_types.h"
 #include "BlockDevice.h"
+
+inline uint64_t
+get_time_usecs(void)
+{
+  struct timeval tv = { 0, 0};
+  gettimeofday(&tv, NULL);
+  return ((tv.tv_sec * 1000 * 1000) + tv.tv_usec);
+}
+
+
 class Allocator;
 class FreelistManager;
 class BlueFS;
@@ -970,6 +980,34 @@ public:
 
     state_t state;
 
+		struct state_stats {
+			uint64_t state_start;
+			std::map<state_t, uint64_t> state_times;
+
+			state_stats() {
+				state_start = get_time_usecs();
+				state_times[STATE_PREPARE] = 0;
+			}
+			state_stats(state_t first_state) {
+				state_start = get_time_usecs();
+				state_times[first_state] = 0;
+			}
+
+			void trans_state_stats(state_t last_state, state_t new_state) {
+				uint64_t t1 = get_time_usecs();
+				state_times[last_state] = t1 - state_start; 
+				state_times[new_state] = 0;
+				state_start = t1;
+			}	
+
+			uint64_t get_state_time(state_t st) {
+				return state_times[st];
+			}
+		};
+
+		typedef state_stats state_stats_t;
+//		state_stats_t state_stats;
+
     const char *get_state_name() {
       switch (state) {
       case STATE_PREPARE: return "prepare";
@@ -1233,6 +1271,10 @@ public:
     bool _empty() {
       return wal_queue.empty();
     }
+
+		int _q_size() {
+			return wal_queue.size();
+		}
     bool _enqueue(TransContext *i) {
       if (i->osr->wal_q.empty()) {
 	wal_queue.push_back(*i->osr);
@@ -1428,6 +1470,8 @@ private:
   void _txc_update_store_statfs(TransContext *txc);
   void _txc_add_transaction(TransContext *txc, Transaction *t);
   void _txc_write_nodes(TransContext *txc, KeyValueDB::Transaction t);
+	
+  int _wal_queue_op;
   void _txc_state_proc(TransContext *txc);
   void _txc_aio_submit(TransContext *txc);
   void _txc_finalize_kv(TransContext *txc, KeyValueDB::Transaction t);

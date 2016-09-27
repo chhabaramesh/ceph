@@ -115,8 +115,16 @@ public:
   typedef ceph::shared_ptr< TransactionImpl > Transaction;
 
   /// create a new instance
+#if 1
   static KeyValueDB *create(CephContext *cct, const std::string& type,
 			    const std::string& dir,
+			    void *p = NULL);
+
+#endif
+
+  static KeyValueDB *create(CephContext *cct, const std::string& type,
+			    const std::string& dir,
+				 bool bypass_write,
 			    void *p = NULL);
 
   /// test whether we can successfully initialize; may have side effects (e.g., create)

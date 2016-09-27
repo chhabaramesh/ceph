@@ -51,7 +51,7 @@ BitMapAllocator::BitMapAllocator(int64_t device_size, int64_t block_size)
 
   m_block_size = block_size;
   m_bit_alloc = new BitAllocator(device_size / block_size,
-        zone_size_blks, CONCURRENT, true);
+        zone_size_blks, SERIAL, true);
   assert(m_bit_alloc);
   if (!m_bit_alloc) {
     derr << __func__ << " Unable to intialize Bit Allocator" << dendl;

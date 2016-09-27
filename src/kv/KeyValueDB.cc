@@ -33,10 +33,24 @@ KeyValueDB *KeyValueDB::create(CephContext *cct, const string& type,
 
   if ((type == "memdb") && 
     cct->check_experimental_feature_enabled("memdb")) {
-    return new MemDB(cct, dir, p);
+    return new MemDB(cct, dir, false, p);
   }
   return NULL;
 }
+#if 1
+KeyValueDB *KeyValueDB::create(CephContext *cct, const string& type,
+			       const string& dir, bool b_w,
+			       void *p)
+{
+
+  if ((type == "memdb") && 
+    cct->check_experimental_feature_enabled("memdb")) {
+    return new MemDB(cct, dir, b_w, p);
+  }
+  return NULL;
+}
+
+#endif
 
 int KeyValueDB::test_init(const string& type, const string& dir)
 {

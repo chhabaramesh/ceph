@@ -33,6 +33,30 @@ static void usage()
   generic_server_usage();
 }
 
+static int64_t total_ops = 0;
+static int64_t total_time = 1;
+bool done = false;
+
+inline uint64_t
+get_time_usecs(void)
+{
+  struct timeval tv = { 0, 0};
+  gettimeofday(&tv, NULL);
+  return ((tv.tv_sec * 1000 * 1000) + tv.tv_usec);
+}
+
+
+void
+stats_thd(const char *msg)
+{
+	total_time = get_time_usecs();
+	while(!done) {
+		sleep(5);
+		derr <<"Stats: tput: "<< total_ops / ((get_time_usecs() - total_time) /1000000) << " , total_ops : "<< total_ops << dendl;
+	}
+	total_time = (get_time_usecs() - total_time) / 1000000;
+}
+
 // helper class for bytes with units
 struct byte_units {
   size_t v;
@@ -90,13 +114,42 @@ public:
     std::lock_guard<std::mutex> lock(*mutex);
     *done = true;
     cond->notify_one();
+    //cond->notify_all();
   }
 };
+
+
 
 void osbench_worker(ObjectStore *os, const Config &cfg,
                     const coll_t cid, const ghobject_t oid,
                     uint64_t starting_offset)
 {
+#if 1
+  spg_t pg(pg_t(rand(), 0, 0), shard_id_t(rand()));
+  std::stringstream oss;
+  const coll_t cid2(pg);
+  {
+    ObjectStore::Sequencer osr(__func__);
+    ObjectStore::Transaction t;
+    t.create_collection(cid2, 0xff);
+    os->apply_transaction(&osr, std::move(t));
+  }
+
+  ghobject_t oid2 = ghobject_t(pg.make_temp_hobject(oss.str()));
+
+  oss << "osbench-thread-" << rand();
+//  oids.emplace_back(pg.make_temp_hobject(oss.str()));
+
+  ObjectStore::Sequencer osr(__func__);
+  ObjectStore::Transaction t;
+  t.touch(cid2, oid2);
+  int r = os->apply_transaction(&osr, std::move(t));
+  assert(r == 0);
+ #else
+ coll_t cid2 = cid;
+ ghobject_t oid2 = oid;
+ #endif 
+
   bufferlist data;
   data.append(buffer::create(cfg.block_size));
 
@@ -111,35 +164,62 @@ void osbench_worker(ObjectStore *os, const Config &cfg,
   for (int i = 0; i < cfg.repeats; ++i) {
     uint64_t offset = starting_offset;
     size_t len = cfg.size;
+	uint64_t k = 0;
 
-    vector<ObjectStore::Transaction> tls;
+	uint64_t blen = 4096 * 1024;
+	int num_txns = len / blen;
+	std::cout << "Write cycle " << i << std::endl;
 
-    std::cout << "Write cycle " << i << std::endl;
-    while (len) {
-      size_t count = len < cfg.block_size ? len : (size_t)cfg.block_size;
+	std::cout << "Txn " << num_txns << "with" << blen <<" length"<< std::endl;;
+	for (int j = 0; j < num_txns; j++) {
+		vector<ObjectStore::Transaction> tls;
+		int txn_count = 0;
+		int op_len = blen;
 
-      auto t = new ObjectStore::Transaction;
-      t->write(cid, oid, offset, count, data);
-      tls.push_back(std::move(*t));
-      delete t;
+		std::mutex mutex;
+		std::condition_variable cond;
+		bool done = false;
+		auto c = new C_NotifyCond(&mutex, &cond, &done);
+//		std::cout << "Write cycle " << i << std::endl;
+		while (op_len) {
+		  size_t count = op_len < cfg.block_size ? op_len : (size_t)cfg.block_size;
 
-      offset += count;
-      if (offset > cfg.size)
-        offset -= cfg.size;
-      len -= count;
-    }
+		  if ((k++ % 1000) == 0) {
+				__sync_fetch_and_add(&total_ops, k);
+				k = 0;
+	//			std::cout << "Written objects " << k << std::endl;
+		  }
+		  //auto t = new ObjectStore::Transaction;
+		  ObjectStore::Transaction t;
+		  //t.write(cid2, oid2, offset, count, data);
+		  t.write(cid2, oid2, ((rand() % len) / cfg.block_size)*cfg.block_size , count, data);
+		  tls.push_back(std::move(t));
+		//  delete t;
+		  txn_count++;
 
-    // set up the finisher
-    std::mutex mutex;
-    std::condition_variable cond;
-    bool done = false;
+		  offset += count;
+		  if (offset > cfg.size)
+			offset -= cfg.size;
+		  op_len -= count;
+		}
 
-    os->queue_transactions(&sequencer, tls, nullptr,
-                           new C_NotifyCond(&mutex, &cond, &done));
+		// set up the finisher
+		if (txn_count > 0) {
+#if 0
+			std::mutex mutex;
+			std::condition_variable cond;
+			bool done = false;
+#endif
+		  done = false;
 
-    std::unique_lock<std::mutex> lock(mutex);
-    cond.wait(lock, [&done](){ return done; });
-    lock.unlock();
+			os->queue_transactions(&sequencer, tls, nullptr, c);
+//								   &(C_NotifyCond(&mutex, &cond, &done)));
+
+			std::unique_lock<std::mutex> lock(mutex);
+			cond.wait(lock, [&done](){ return done; });
+			lock.unlock();
+		}
+	}
 
 
   }
@@ -291,6 +371,9 @@ int main(int argc, const char *argv[])
   std::vector<std::thread> workers;
   workers.reserve(cfg.threads);
 
+
+	std::thread stats_thd1(stats_thd, "ramesh"); 
+
   using namespace std::chrono;
   auto t1 = high_resolution_clock::now();
   for (int i = 0; i < cfg.threads; i++) {
@@ -303,6 +386,7 @@ int main(int argc, const char *argv[])
   auto t2 = high_resolution_clock::now();
   workers.clear();
 
+  os->umount();
   auto duration = duration_cast<microseconds>(t2 - t1);
   byte_units total = cfg.size * cfg.repeats * cfg.threads;
   byte_units rate = (1000000LL * total) / duration.count();
@@ -311,7 +395,11 @@ int main(int argc, const char *argv[])
       << duration.count() << "us, at a rate of " << rate << "/s and "
       << iops << " iops" << dendl;
 
+	done = true;
+	stats_thd1.join();
+
   // remove the objects
+ #if 0
   ObjectStore::Sequencer osr(__func__);
   ObjectStore::Transaction t;
   for (const auto &oid : oids)
@@ -319,5 +407,8 @@ int main(int argc, const char *argv[])
   os->apply_transaction(&osr,std::move(t));
 
   os->umount();
+#endif
+
+  derr << " Finished test.\n" << dendl;;
   return 0;
 }

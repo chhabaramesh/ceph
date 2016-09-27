@@ -32,8 +32,15 @@ class MemDB : public KeyValueDB
   std::mutex m_lock;
   uint64_t m_total_bytes;
   uint64_t m_allocated_bytes;
+	bool bypass_write;
+	int64_t num_ops;
 
-  btree::btree_map<std::string, bufferptr> m_btree;
+  //btree::btree_map<std::string, bufferptr> m_btree;
+//	typedef btree::btree_map<std::string, bufferptr> btree_map_t;
+	std::map<std::string, bufferptr> m_btree;
+//	btree_map_t m_btree;
+
+	
   CephContext *m_cct;
   void* m_priv;
   string m_options;
@@ -42,19 +49,28 @@ class MemDB : public KeyValueDB
   int transaction_rollback(KeyValueDB::Transaction t);
   int _open(ostream &out);
   void close();
+	bool bypass_ops() {
+		if (__sync_fetch_and_add(&num_ops, 1) > 10000 && bypass_write) {
+			return true;
+		}
+		return false;
+	}
   bool _get(const string &prefix, const string &k, bufferlist *out);
   bool _get_locked(const string &prefix, const string &k, bufferlist *out);
   std::string _get_data_fn();
-  void _encode(btree::btree_map<string, bufferptr>:: iterator iter, bufferlist &bl);
+  //void _encode(btree::btree_map<string, bufferptr>:: iterator iter, bufferlist &bl);
+  void _encode(std::map<std::string, bufferptr>::iterator iter, bufferlist &bl);
   void _save();
   int _load();
   uint64_t iterator_seq_no;
 
 public:
-  MemDB(CephContext *c, const string &path, void *p) :
+  MemDB(CephContext *c, const string &path, bool bp_w, void *p) :
     m_cct(c), m_priv(p), m_db_path(path), iterator_seq_no(1)
   {
     //Nothing as of now
+		bypass_write = bp_w;
+		num_ops = 0;
   }
 
   ~MemDB();
@@ -129,15 +145,19 @@ public:
 
   class MDBWholeSpaceIteratorImpl : public KeyValueDB::WholeSpaceIteratorImpl {
 
-      btree::btree_map<string, bufferptr>::iterator m_iter;
+      //btree::btree_map<string, bufferptr>::iterator m_iter;
+      std::map<string, bufferptr>::iterator m_iter;
       std::pair<string, bufferlist> m_key_value;
-      btree::btree_map<std::string, bufferptr> *m_btree_p;
+      //btree::btree_map<std::string, bufferptr> *m_btree_p;
+      std::map<std::string, bufferptr> *m_btree_p;
       std::mutex *m_btree_lock_p;
       uint64_t *global_seq_no;
       uint64_t this_seq_no;
 
   public:
-    MDBWholeSpaceIteratorImpl(btree::btree_map<std::string, bufferptr> *btree_p,
+    //MDBWholeSpaceIteratorImpl(btree::btree_map<std::string, bufferptr> *btree_p,
+      //                       std::mutex *btree_lock_p, uint64_t *iterator_seq_no) {
+    MDBWholeSpaceIteratorImpl(std::map<std::string, bufferptr> *btree_p,
                              std::mutex *btree_lock_p, uint64_t *iterator_seq_no) {
         m_btree_p = btree_p;
         m_btree_lock_p = btree_lock_p;

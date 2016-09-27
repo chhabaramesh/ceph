@@ -50,7 +50,9 @@ static string make_key(const string &prefix, const string &value)
   return out;
 }
 
-void MemDB::_encode(btree::btree_map<string,
+//void MemDB::_encode(btree::btree_map<string,
+  //                    bufferptr>:: iterator iter, bufferlist &bl)
+void MemDB::_encode(std::map<string,
                       bufferptr>:: iterator iter, bufferlist &bl)
 {
   ::encode(iter->first, bl);
@@ -77,7 +79,8 @@ void MemDB::_save()
     return;
   }
   bufferlist bl;
-  btree::btree_map<string, bufferptr>::iterator iter = m_btree.begin();
+  //btree::btree_map<string, bufferptr>::iterator iter = m_btree.begin();
+  std::map<string, bufferptr>::iterator iter = m_btree.begin();
   while (iter != m_btree.end()) {
     dout(10) << __func__ << " Key:"<< iter->first << dendl;
     _encode(iter, bl);
@@ -133,8 +136,10 @@ int MemDB::_load()
 int MemDB::_init(bool create)
 {
   int r;
-  dout(1) << __func__ << dendl;
+  dout(1) << __func__ << bypass_ops() << dendl;
   if (create) {
+		bypass_write = false;
+		dout(1) << __func__ << "bypass_write = " << bypass_write << "Create = " << create << dendl;
     r = ::mkdir(m_db_path.c_str(), 0700);
     if (r < 0) {
       r = -errno;
@@ -183,6 +188,9 @@ void MemDB::close()
 
 int MemDB::submit_transaction(KeyValueDB::Transaction t)
 {
+  if (bypass_ops()) {
+		return 0;
+  }
   MDBTransactionImpl* mt =  static_cast<MDBTransactionImpl*>(t.get());
 
   dtrace << __func__ << " " << mt->get_ops().size() << dendl;
@@ -253,6 +261,9 @@ void MemDB::MDBTransactionImpl::merge(
 
 int MemDB::_setkey(ms_op_t &op)
 {
+  if (bypass_ops() && op.first.first == std::string("O")) {
+		return 0;
+  }
   std::lock_guard<std::mutex> l(m_lock);
   std::string key = make_key(op.first.first, op.first.second);
   bufferlist bl = op.second;
@@ -276,6 +287,9 @@ int MemDB::_setkey(ms_op_t &op)
 
 int MemDB::_rmkey(ms_op_t &op)
 {
+  if (bypass_ops()) {
+		return 0;
+  }
   std::lock_guard<std::mutex> l(m_lock);
   std::string key = make_key(op.first.first, op.first.second);
 
@@ -306,6 +320,9 @@ std::shared_ptr<KeyValueDB::MergeOperator> MemDB::_find_merge_op(std::string pre
 
 int MemDB::_merge(ms_op_t &op)
 {
+  if (bypass_ops()) {
+		return 0;
+  }
   std::lock_guard<std::mutex> l(m_lock);
   std::string prefix = op.first.first;
   std::string key = make_key(op.first.first, op.first.second);
@@ -353,8 +370,10 @@ bool MemDB::_get(const string &prefix, const string &k, bufferlist *out)
 {
   string key = make_key(prefix, k);
 
-  btree::btree_map<string, bufferptr>::iterator iter = m_btree.find(key);
+  //btree::btree_map<string, bufferptr>::iterator iter = m_btree.find(key);
+  std::map<string, bufferptr>::iterator iter = m_btree.find(key);
   if (iter == m_btree.end()) {
+    dout(10) << __func__ << "Get failed for key " << key << dendl;
     return false;
   }
 
