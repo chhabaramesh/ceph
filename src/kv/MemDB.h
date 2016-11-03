@@ -32,6 +32,7 @@ class MemDB : public KeyValueDB
   std::mutex m_lock;
   uint64_t m_total_bytes;
   uint64_t m_allocated_bytes;
+  std::atomic<int64_t> m_bypass_ops;
 
   typedef std::map<std::string, bufferptr> mdb_map_t;
   typedef mdb_map_t::iterator mdb_iter_t;
@@ -54,6 +55,7 @@ class MemDB : public KeyValueDB
   void _save();
   int _load();
   uint64_t iterator_seq_no;
+  bool _bypass_ops();
 
 public:
   MemDB(CephContext *c, const string &path, void *p) :

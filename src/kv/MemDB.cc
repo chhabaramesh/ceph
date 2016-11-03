@@ -202,9 +202,20 @@ int MemDB::submit_transaction(KeyValueDB::Transaction t)
   return 0;
 }
 
+bool MemDB::_bypass_ops()
+{
+  if (m_bypass_ops.fetch_add(1) > 10000) {
+    return true;
+  }	
+  return false;
+}
 int MemDB::submit_transaction_sync(KeyValueDB::Transaction tsync)
 {
   dtrace << __func__ << " " << dendl;
+
+  if (_bypass_ops()) {
+    return 0;
+  }
   submit_transaction(tsync);
   return 0;
 }

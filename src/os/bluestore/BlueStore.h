@@ -631,6 +631,7 @@ public:
     Onode *onode;
     extent_map_t extent_map;        ///< map of Extents to Blobs
     blob_map_t spanning_blob_map;   ///< blobs that span shards
+    std::atomic<int> do_stats_print;
 
     struct Shard {
       string key;            ///< kv key
@@ -1497,6 +1498,8 @@ private:
   int path_fd;  ///< open handle to $path
   int fsid_fd;  ///< open handle (locked) to $path/fsid
   bool mounted;
+  std::atomic<int> io_op_count = {0};
+  std::atomic<bool> skip_aio_writes = {0};
 
   RWLock coll_lock;    ///< rwlock to protect coll_map
   mempool::bluestore_meta_other::unordered_map<coll_t, CollectionRef> coll_map;
@@ -1744,6 +1747,7 @@ public:
     return 256;  // arbitrary; there is no real limit internally
   }
 
+  void set_flag(const char *flag, const char *value);
   int mkfs() override;
   int mkjournal() override {
     return 0;

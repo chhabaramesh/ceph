@@ -20,18 +20,26 @@
 static void usage()
 {
   derr << "usage: ceph_objectstore_bench [flags]\n"
-      "	 --size\n"
-      "	       total size in bytes\n"
-      "	 --block-size\n"
-      "	       block size in bytes for each write\n"
-      "	 --repeats\n"
-      "	       number of times to repeat the write cycle\n"
-      "	 --threads\n"
-      "	       number of threads to carry out this workload\n"
-      "	 --multi-object\n"
-      "	       have each thread write to a separate object\n" << dendl;
+      "   --size\n"
+      "         total size in bytes\n"
+      "   --block-size\n"
+      "         block size in bytes for each write\n"
+      "   --repeats\n"
+      "         number of times to repeat the write cycle\n"
+      "   --threads\n"
+      "         number of threads to carry out this workload\n"
+      "   --fill\n"
+      "         fill device first\n"
+      "   --multi-object\n"
+      "         have each thread write to a separate object\n" << dendl;
   generic_server_usage();
 }
+
+static int64_t total_ops = 0;
+static int64_t total_read_ops = 0;
+static int64_t total_write_ops = 0;
+static int64_t total_time = 1;
+bool _test_done = false;
 
 // helper class for bytes with units
 struct byte_units {
@@ -72,12 +80,61 @@ struct Config {
   byte_units block_size;
   int repeats;
   int threads;
+  int time_secs;
   bool multi_object;
+  bool fill;
+  int write_pct;
+  //std::unique_ptr<ObjectStore> os;
+  ObjectStore *os;
+  
   Config()
     : size(1048576), block_size(4096),
       repeats(1), threads(1),
       multi_object(false) {}
 };
+uint64_t total_test_time = 900;
+
+inline uint64_t
+get_time_usecs(void)
+{
+  struct timeval tv = { 0, 0};
+  gettimeofday(&tv, NULL);
+  return ((tv.tv_sec * 1000 * 1000) + tv.tv_usec);
+}
+
+std::atomic_int _tid_count;
+thread_local int _my_tid = 0;
+std::atomic<uint64_t> _total_data_written;
+std::atomic_int _not_filled;
+
+void
+stats_thd(const Config *cfg)
+{
+  int64_t last_ops = 0;
+  int64_t last_time = get_time_usecs();
+  cfg->os->set_flag("skip_aio_writes", "1");
+  while (_not_filled) {
+    sleep(5);
+    dout(10) << "Stats: written " << byte_units(_total_data_written) <<" of "<< cfg->size <<"." <<dendl;
+  }
+
+  cfg->os->set_flag("skip_aio_writes", "0");
+  total_time = get_time_usecs();
+  while(!_test_done) {
+    sleep(5);
+    int64_t divisor = ((get_time_usecs() - total_time) /1000000);
+    int64_t time_i = get_time_usecs();
+    int64_t divisor_i = ((time_i - last_time) /1000000);
+    last_time = time_i;
+    dout(10) <<"Stats: tput = "<< total_ops / divisor << ", write ops = " << total_write_ops / divisor  <<
+                             ", read ops = " << total_read_ops / divisor  <<" , total_ops = "<< total_ops << 
+                              ", Itput = " << (total_ops - last_ops) / divisor_i << "." << dendl;
+    last_ops = total_ops;
+
+  }
+  total_time = (get_time_usecs() - total_time) / 1000000;
+}
+
 
 class C_NotifyCond : public Context {
   std::mutex *mutex;
@@ -93,67 +150,142 @@ public:
   }
 };
 
+
+
 void osbench_worker(ObjectStore *os, const Config &cfg,
                     const coll_t cid, const ghobject_t oid,
                     uint64_t starting_offset)
 {
+
+  _my_tid = _tid_count.fetch_add(1);
+
+  int obj_size = (4 * 1024 * 1024);
+  uint32_t block_size = cfg.block_size;
+  int64_t my_size = cfg.size / cfg.threads;
+  int num_objs = my_size / obj_size;
+  spg_t pg(pg_t(rand(), 0, 0), shard_id_t(rand()));
+  std::stringstream oss;
+
+  const coll_t cid2(pg);
+  {
+    ObjectStore::Sequencer osr(__func__);
+    ObjectStore::Transaction t;
+    t.create_collection(cid2, 0xff);
+    os->apply_transaction(&osr, std::move(t));
+  }
+
+  dout(10) << "Thread id " << _my_tid << ", objs = " << num_objs << ", size = "<<
+      obj_size << ", total = " << my_size << dendl;
+
+  oss << "osbench-thread-" << rand();
+  std::vector<ghobject_t *> *oids = new std::vector<ghobject_t *>(num_objs);
+  for (auto p = oids->begin(); p != oids->end(); p++) {
+    std::string s = oss.str();
+    s.append(std::to_string(rand()));;
+    (*p) = new ghobject_t(pg.make_temp_hobject(s.c_str()));
+  }
+
+   dout(10) << "Created " << oids->size() << " oids" << dendl;
+
+
+
+
+  ObjectStore::Sequencer osr(__func__);
+  {
+    int count = 0;
+    for (auto p = oids->begin(); p != oids->end(); p++) {
+      ObjectStore::Transaction t;
+      ghobject_t *c_oid = (*oids)[count];
+      t.touch(cid2, *c_oid);
+      int r = os->apply_transaction(&osr, std::move(t));
+      assert(r == 0);
+      count++;
+    }
+  }
+
+  if (cfg.fill) {
+    uint64_t data_filled = 0;
+    int64_t count = 0;
+    bufferlist data;
+    data.append(buffer::create(obj_size));
+
+    dout(10) << "Thread id " << _my_tid << " doing " << my_size << " data fill" << dendl;
+    
+    for (auto p = oids->begin(); p != oids->end(); p++) {
+
+      ObjectStore::Transaction t;
+      ghobject_t *oidp = (*oids)[rand() % num_objs];
+      t.write(cid2, *oidp, 0, obj_size, data);
+      int r = os->apply_transaction(&osr, std::move(t));
+      assert(r == 0);
+      data_filled += obj_size;
+
+      if (count++ > 100) {
+        _total_data_written.fetch_add(data_filled);
+        count = 0;
+        data_filled = 0;
+      }
+    }
+    dout(10) << "Thread id " << _my_tid << " done " << byte_units(my_size) << " data fill" << dendl;
+  }
+
+
+  sleep(10);
+  _not_filled.fetch_sub(1);
+
   bufferlist data;
   data.append(buffer::create(cfg.block_size));
+  int count = 0;
+  int read_ops = (100 - cfg.write_pct) / 10;
+  int write_ops = cfg.write_pct / 10;
 
-  dout(0) << "Writing " << cfg.size
-      << " in blocks of " << cfg.block_size << dendl;
+  while (!_test_done) {
+    for (int i = 0; i < write_ops; i++) {
+      ObjectStore::Transaction t;
+      ghobject_t *oidp = (*oids)[rand() % num_objs];
 
-  assert(starting_offset < cfg.size);
-  assert(starting_offset % cfg.block_size == 0);
-
-  ObjectStore::Sequencer sequencer("osbench");
-
-  for (int i = 0; i < cfg.repeats; ++i) {
-    uint64_t offset = starting_offset;
-    size_t len = cfg.size;
-
-    vector<ObjectStore::Transaction> tls;
-
-    std::cout << "Write cycle " << i << std::endl;
-    while (len) {
-      size_t count = len < cfg.block_size ? len : (size_t)cfg.block_size;
-
-      auto t = new ObjectStore::Transaction;
-      t->write(cid, oid, offset, count, data);
-      tls.push_back(std::move(*t));
-      delete t;
-
-      offset += count;
-      if (offset > cfg.size)
-        offset -= cfg.size;
-      len -= count;
+      uint64_t offset = ((rand() % obj_size) / block_size) * block_size;
+      uint32_t length = block_size;
+      t.write(cid2, *oidp, offset, length, data);
+      int r = os->apply_transaction(&osr, std::move(t));
+      assert(r == 0);
     }
 
-    // set up the finisher
-    std::mutex mutex;
-    std::condition_variable cond;
-    bool done = false;
+    for (int i = 0; i < read_ops; i++) {
+      ghobject_t *oidp = (*oids)[rand() % num_objs];
 
-    os->queue_transactions(&sequencer, tls, nullptr,
-                           new C_NotifyCond(&mutex, &cond, &done));
+      uint64_t offset = ((rand() % obj_size) / block_size) * block_size;
+      int length = block_size;
+     
+      int r = os->read(cid2, *oidp, offset, length, data); 
+      assert(r > 0 && r == length);
+    }
 
-    std::unique_lock<std::mutex> lock(mutex);
-    cond.wait(lock, [&done](){ return done; });
-    lock.unlock();
-
-
+    count += read_ops + write_ops;
+    if ((count > 1000) == 0) {
+      __sync_fetch_and_add(&total_ops, count);
+      __sync_fetch_and_add(&total_read_ops, read_ops);
+      __sync_fetch_and_add(&total_write_ops, write_ops);
+      count = 0;
+    }
   }
-  sequencer.flush();
+
+   dout(10) << "Thread id " << _my_tid << " done. exiting. " << dendl; 
 }
 
 int main(int argc, const char *argv[])
 {
-  Config cfg;
 
   // command-line arguments
   vector<const char*> args;
   argv_to_vec(argc, argv, args);
   env_to_vec(args);
+  Config cfg;
+
+  _tid_count = 0;
+  cfg.time_secs = 900;
+  cfg.write_pct = 100;
+  _total_data_written = 0;
 
   global_init(nullptr, args, CEPH_ENTITY_TYPE_OSD, CODE_ENVIRONMENT_UTILITY, 0);
 
@@ -177,10 +309,20 @@ int main(int argc, const char *argv[])
       }
     } else if (ceph_argparse_witharg(args, i, &val, "--repeats", (char*)nullptr)) {
       cfg.repeats = atoi(val.c_str());
+    } else if (ceph_argparse_witharg(args, i, &val, "--time", (char*)nullptr)) {
+      cfg.time_secs = atoi(val.c_str());
+    } else if (ceph_argparse_witharg(args, i, &val, "--write_pct", (char*)nullptr)) {
+      cfg.write_pct = atoi(val.c_str());
+      if (cfg.write_pct > 100) {
+        derr << "Invalid write precentage ratio. "<< dendl;
+        return -1;
+      }
     } else if (ceph_argparse_witharg(args, i, &val, "--threads", (char*)nullptr)) {
       cfg.threads = atoi(val.c_str());
     } else if (ceph_argparse_flag(args, i, "--multi-object", (char*)nullptr)) {
       cfg.multi_object = true;
+    } else if (ceph_argparse_flag(args, i, "--fill", (char*)nullptr)) {
+      cfg.fill = true;
     } else {
       derr << "Error: can't understand argument: " << *i << "\n" << dendl;
       usage();
@@ -195,14 +337,22 @@ int main(int argc, const char *argv[])
   dout(0) << "journal " << g_conf->osd_journal << dendl;
   dout(0) << "size " << cfg.size << dendl;
   dout(0) << "block-size " << cfg.block_size << dendl;
+  dout(0) << "write% " << cfg.write_pct<< dendl;
   dout(0) << "repeats " << cfg.repeats << dendl;
   dout(0) << "threads " << cfg.threads << dendl;
+  dout(0) << "time " << cfg.time_secs << dendl;
 
   auto os = std::unique_ptr<ObjectStore>(
       ObjectStore::create(g_ceph_context,
                           g_conf->osd_objectstore,
                           g_conf->osd_data,
                           g_conf->osd_journal));
+
+  _not_filled = 0;
+  if (cfg.fill) {
+    _not_filled = cfg.threads;
+  }
+  cfg.os = os.get();
 
   //Checking data folder: create if needed or error if it's not empty
   DIR *dir = ::opendir(g_conf->osd_data.c_str());
@@ -262,6 +412,7 @@ int main(int argc, const char *argv[])
     os->apply_transaction(&osr, std::move(t));
   }
 
+
   // create the objects
   std::vector<ghobject_t> oids;
   if (cfg.multi_object) {
@@ -291,6 +442,9 @@ int main(int argc, const char *argv[])
   std::vector<std::thread> workers;
   workers.reserve(cfg.threads);
 
+
+  std::thread stats_thd1(stats_thd, &cfg); 
+
   using namespace std::chrono;
   auto t1 = high_resolution_clock::now();
   for (int i = 0; i < cfg.threads; i++) {
@@ -298,26 +452,29 @@ int main(int argc, const char *argv[])
     workers.emplace_back(osbench_worker, os.get(), std::ref(cfg),
                          cid, oid, i * cfg.size / cfg.threads);
   }
+
+   while (_not_filled) {
+     sleep(10);
+    }
+   sleep(cfg.time_secs);
+   _test_done = true;
+
   for (auto &worker : workers)
     worker.join();
   auto t2 = high_resolution_clock::now();
   workers.clear();
 
+  os->umount();
+
   auto duration = duration_cast<microseconds>(t2 - t1);
-  byte_units total = cfg.size * cfg.repeats * cfg.threads;
+  byte_units total = cfg.size * cfg.repeats;
   byte_units rate = (1000000LL * total) / duration.count();
   size_t iops = (1000000LL * total / cfg.block_size) / duration.count();
   dout(0) << "Wrote " << total << " in "
       << duration.count() << "us, at a rate of " << rate << "/s and "
       << iops << " iops" << dendl;
 
-  // remove the objects
-  ObjectStore::Sequencer osr(__func__);
-  ObjectStore::Transaction t;
-  for (const auto &oid : oids)
-    t.remove(cid, oid);
-  os->apply_transaction(&osr,std::move(t));
 
-  os->umount();
+  derr << " Finished test.\n" << dendl;;
   return 0;
 }

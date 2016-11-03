@@ -1586,6 +1586,7 @@ bool BlueStore::ExtentMap::update(Onode *o, KeyValueDB::Transaction t,
       // we need to encode inline_bl to measure encoded length
       bool never_happen = encode_some(0, OBJECT_MAX_SIZE, inline_bl, &n);
       assert(!never_happen);
+
       size_t len = inline_bl.length();
       dout(20) << __func__ << " inline shard "
 	       << len << " bytes from " << n << " extents" << dendl;
@@ -2025,6 +2026,13 @@ void BlueStore::ExtentMap::dirty_range(
 {
   dout(30) << __func__ << " 0x" << std::hex << offset << "~" << length
 	   << std::dec << dendl;
+#if 0
+  if (do_stats_print.fetch_add(1) > 1000000) {
+    dout(1) << __func__ << " Shard size = " << shards.size() << dendl;
+    do_stats_print.fetch_and(0);
+  }
+#endif
+
   if (shards.empty()) {
     dout(20) << __func__ << " mark inline shard dirty" << dendl;
     inline_bl.clear();
@@ -3758,6 +3766,15 @@ int BlueStore::_setup_block_symlink_or_file(
   }
   return 0;
 }
+
+void BlueStore::set_flag(const char *flag, const char *value)
+{
+  if (strcmp(flag, "skip_aio_writes") == 0) {
+    skip_aio_writes = std::atoi(value);
+  }
+}
+
+
 
 int BlueStore::mkfs()
 {
@@ -6200,8 +6217,10 @@ void BlueStore::_txc_state_proc(TransContext *txc)
       txc->log_state_latency(logger, l_bluestore_state_prepare_lat);
       if (txc->ioc.has_pending_aios()) {
 	txc->state = TransContext::STATE_AIO_WAIT;
-	_txc_aio_submit(txc);
-	return;
+        if (io_op_count.fetch_add(1) < 100 || !skip_aio_writes) {
+	  _txc_aio_submit(txc);
+          return;
+        }
       }
       // ** fall-thru **
 
