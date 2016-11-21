@@ -15,11 +15,13 @@
 #include "common/strtol.h"
 #include "common/ceph_argparse.h"
 
-#define dout_subsys ceph_subsys_filestore
+#define dout_subsys ceph_subsys_objectstorebench
 
 static void usage()
 {
-  derr << "usage: ceph_objectstore_bench [flags]\n"
+  derr << "usage: ceph_objectstore_bench [options]\n"
+      "   --conf\n"
+      "         ceph.conf file location.\n"
       "   --size\n"
       "         total size in bytes\n"
       "   --block-size\n"
@@ -28,10 +30,10 @@ static void usage()
       "         number of times to repeat the write cycle\n"
       "   --threads\n"
       "         number of threads to carry out this workload\n"
+      "   --write_pct\n"
+      "         % of writes in read + write workloads. Default is 100%.\n"
       "   --fill\n"
-      "         fill device first\n"
-      "   --multi-object\n"
-      "         have each thread write to a separate object\n" << dendl;
+      "         fill device first\n" << dendl;
   generic_server_usage();
 }
 
@@ -39,7 +41,7 @@ static int64_t total_ops = 0;
 static int64_t total_read_ops = 0;
 static int64_t total_write_ops = 0;
 static int64_t total_time = 1;
-bool _test_done = false;
+static bool _test_done = false;
 
 // helper class for bytes with units
 struct byte_units {
@@ -84,7 +86,6 @@ struct Config {
   bool multi_object;
   bool fill;
   int write_pct;
-  //std::unique_ptr<ObjectStore> os;
   ObjectStore *os;
   
   Config()
@@ -150,8 +151,6 @@ public:
   }
 };
 
-
-
 void osbench_worker(ObjectStore *os, const Config &cfg,
                     const coll_t cid, const ghobject_t oid,
                     uint64_t starting_offset)
@@ -185,10 +184,7 @@ void osbench_worker(ObjectStore *os, const Config &cfg,
     (*p) = new ghobject_t(pg.make_temp_hobject(s.c_str()));
   }
 
-   dout(10) << "Created " << oids->size() << " oids" << dendl;
-
-
-
+  dout(10) << "Created " << oids->size() << " oids" << dendl;
 
   ObjectStore::Sequencer osr(__func__);
   {
@@ -459,6 +455,10 @@ int main(int argc, const char *argv[])
    sleep(cfg.time_secs);
    _test_done = true;
 
+   dout(0) << "Waiting for db settle down/compaction. " << dendl;
+   //sleep(1800);
+   dout(0) << "DONE:  db settle down/compaction. " << dendl;
+
   for (auto &worker : workers)
     worker.join();
   auto t2 = high_resolution_clock::now();
@@ -475,6 +475,6 @@ int main(int argc, const char *argv[])
       << iops << " iops" << dendl;
 
 
-  derr << " Finished test.\n" << dendl;;
+  dout(0) << " Finished test.\n" << dendl;;
   return 0;
 }

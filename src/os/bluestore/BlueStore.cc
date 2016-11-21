@@ -1636,6 +1636,8 @@ bool BlueStore::ExtentMap::update(Onode *o, KeyValueDB::Transaction t,
 
 void BlueStore::ExtentMap::reshard(Onode *o, uint64_t min_alloc_size)
 {
+
+  int shard_count = shards.size();
   needs_reshard = false;
 
   // un-span all blobs
@@ -1701,10 +1703,12 @@ void BlueStore::ExtentMap::reshard(Onode *o, uint64_t min_alloc_size)
   }
   o->onode.extent_map_shards.swap(new_shard_info);
 
+
   // set up new shards vector; ensure shards/inline both dirty/invalidated.
   init_shards(o, true, true);
   inline_bl.clear();
 
+  dout(5) << __func__ << "Resharded from " << shard_count << " to " << shards.size() << dendl;
   // identify spanning blobs
   if (!o->onode.extent_map_shards.empty()) {
     dout(20) << __func__ << " checking for spanning blobs" << dendl;
