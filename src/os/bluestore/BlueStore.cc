@@ -6656,7 +6656,6 @@ void BlueStore::_kv_sync_thread()
 	txc->state = TransContext::STATE_KV_SUBMITTED;
       }
       for (auto txc : kv_committing) {
-	_txc_release_alloc(txc);
 	if (txc->had_ios) {
 	  --txc->osr->txc_with_unstable_io;
 	}
@@ -6712,6 +6711,7 @@ void BlueStore::_kv_sync_thread()
       while (!kv_committing.empty()) {
 	TransContext *txc = kv_committing.front();
 	assert(txc->state == TransContext::STATE_KV_SUBMITTED);
+	_txc_release_alloc(txc);
 	_txc_state_proc(txc);
 	kv_committing.pop_front();
       }
