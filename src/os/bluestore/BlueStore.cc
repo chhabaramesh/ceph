@@ -6614,8 +6614,6 @@ void BlueStore::_kv_sync_thread()
       dout(30) << __func__ << " submitting txc " << kv_submitting << dendl;
       dout(30) << __func__ << " wal_cleaning txc " << wal_cleaning << dendl;
 
-      alloc->commit_start();
-
       // flush/barrier on block device
       bdev->flush();
 
@@ -6719,8 +6717,6 @@ void BlueStore::_kv_sync_thread()
 	_txc_state_proc(txc);
 	wal_cleaning.pop_front();
       }
-
-      alloc->commit_finish();
 
       // this is as good a place as any ...
       _reap_collections();
