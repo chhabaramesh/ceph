@@ -108,6 +108,7 @@ const string PREFIX_SHARED_BLOB = "X"; // u64 offset -> shared_blob_t
  * 'x'
  */
 #define EXTENT_SHARD_KEY_SUFFIX 'x'
+thread_local uint32_t skip_data_write = 0;
 
 /*
  * string encoding in the key
@@ -6805,6 +6806,7 @@ int BlueStore::_do_wal_op(TransContext *txc, bluestore_wal_op_t& wo)
       for (auto& e : wo.extents) {
 	bufferlist bl;
 	p.copy(e.length, bl);
+        skip_data_write = g_conf->bluestore_skip_data_write_for_steady_state_test; 
 	int r = bdev->aio_write(e.offset, bl, &txc->ioc, false);
 	assert(r == 0);
       }
@@ -7528,6 +7530,7 @@ void BlueStore::_do_write_small(
       _buffer_cache_write(txc, b, b_off, padded,
 			  wctx->buffered ? 0 : Buffer::FLAG_NOCACHE);
 
+      skip_data_write = g_conf->bluestore_skip_data_write_for_steady_state_test;
       b->get_blob().map_bl(
 	b_off, padded,
 	[&](uint64_t offset, uint64_t length, bufferlist& t) {
@@ -7849,7 +7852,7 @@ int BlueStore::_do_alloc_write(
         dblob.add_unused(b_end, wi.blob_length - b_end);
       }
     }
-
+    skip_data_write = g_conf->bluestore_skip_data_write_for_steady_state_test;
     // queue io
     b->get_blob().map_bl(
       b_off, *l,
