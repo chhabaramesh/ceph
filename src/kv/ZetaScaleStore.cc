@@ -54,7 +54,7 @@ static std::string decode_key(const std::string &k)
   int pos = 0;
   for (unsigned int i = 0; i < k.length(); i++) {
     if (k[i] == '_' || (k[i] >= 'a' && k[i] <= 'z') ||
-	(k[i] >= 32 && k[i] <= 'Z'))
+        (k[i] >= 32 && k[i] <= 'Z'))
       buf[pos++] = k[i];
     else
       pos += sprintf(&buf[pos], "%.2x", (int)(unsigned char)k[i]);
@@ -72,7 +72,7 @@ static std::string decode_data(const bufferlist &k)
   int pos = 0;
   for (unsigned int i = 0; i < k.length(); i++) {
     if (k[i] == '_' || (k[i] >= 'a' && k[i] <= 'z') ||
-	(k[i] >= 32 && k[i] <= 'Z'))
+        (k[i] >= 32 && k[i] <= 'Z'))
       buf[pos++] = k[i];
     else
       pos += sprintf(&buf[pos], "%.2x", (int)(unsigned char)k[i]);
@@ -118,7 +118,7 @@ static bool is_logging(const std::string &prefix, const std::string &key)
     return false;
 
   dtrace << " " << prefix << " " << decode_key(key) << "(" << key.length()
-	 << ")" << dendl;
+         << ")" << dendl;
 
   return true;
 }
@@ -129,7 +129,7 @@ static bool is_pglog(const std::string &prefix, const std::string &key)
 }
 
 inline std::string combine_strings(const std::string &prefix,
-				   const std::string &value, bool log)
+           const std::string &value, bool log)
 {
   std::string out;
 
@@ -143,7 +143,7 @@ inline std::string combine_strings(const std::string &prefix,
 }
 
 static void append_chunk_number(std::string &key, unsigned int key_len,
-				unsigned int j)
+                                unsigned int j)
 {
   key.resize(key_len + 4);
   key[key_len] = 0;
@@ -198,16 +198,15 @@ int ZSStore::_init(bool format)
   ::close(fd);
   if (size == (off_t)-1) {
     derr << path << " failed to get" << path << " size:" << strerror(errno)
-	 << dendl;
+         << dendl;
     return 1;
   }
 
   if (size < ZS_MINIMUM_DB_SIZE) {
     derr << "Given ZS data partition size " << size
-	 << " is less then minimum 8Gb" << dendl;
+         << " is less then minimum 8Gb" << dendl;
     dinfo << "Please adjust partition size or bluestore_block_db_size"
-	     "accordingly"
-	  << dendl;
+           "accordingly" << dendl;
     return 1;
   }
   data_chunking = 0;
@@ -241,7 +240,7 @@ int ZSStore::_init(bool format)
   ::close(fd);
   if (size == (off_t)-1) {
     derr << path << " failed to get" << path << " size:" << strerror(errno)
-	 << dendl;
+         << dendl;
     return 1;
   }
 
@@ -260,7 +259,7 @@ int ZSStore::_init(bool format)
   int num_part = size / 2 / (16 / 2) / 65536;
 
   dinfo << "ZS log partition size is set to " << size
-	<< ", num internal nvram partitions= " << num_part << dendl;
+        << ", num internal nvram partitions= " << num_part << dendl;
 
   sprintf(str_buf, "%u", num_part);
 
@@ -272,8 +271,6 @@ int ZSStore::_init(bool format)
 
   ZSSetProperty("ZS_CRASH_DIR", g_conf->osd_data.c_str());
 
-  //  char buf[32];
-  //  snprintf(buf, sizeof(buf), ".zs.%d", getpid());
   ZSSetProperty("ZS_LOG_FILE", (g_conf->log_file + ".zs").c_str());
 
   ZSLoadProperties(getenv("ZS_PROPERTY_FILE"));
@@ -299,14 +296,14 @@ int ZSStore::_init(bool format)
 }
 
 static bool open_or_create_container(int create, bool log, ZS_cguid_t *cguid,
-				     const char *name)
+                                     const char *name)
 {
   ZS_container_props_t props;
 
   ZSLoadCntrPropDefaults(&props);
 
   dtrace << "ZSOpenContainer: "
-	 << " " << create << " name: " << name << dendl;
+   << " " << create << " name: " << name << dendl;
 
   props.size_kb = 0;
 
@@ -321,12 +318,12 @@ static bool open_or_create_container(int create, bool log, ZS_cguid_t *cguid,
       (void)ZSDeleteContainer(_thd_state(), *cguid);
 
     status = ZSOpenContainer(_thd_state(), name, &props,
-			     ZS_CTNR_RW_MODE | create, cguid);
+           ZS_CTNR_RW_MODE | create, cguid);
   }
 
   if (status != ZS_SUCCESS)
     derr << "failed. name: " << name << " error: " << ZSStrError(status)
-	 << dendl;
+         << dendl;
 
   return status == ZS_SUCCESS;
 }
@@ -335,12 +332,14 @@ int ZSStore::do_open(ostream &out, int create)
 {
   _init(create == ZS_CTNR_CREATE);
 
-  if (!open_or_create_container(create, false, &cguid, CEPH_ZS_CONTAINER_NAME))
+  if (!open_or_create_container(create, false, &cguid, CEPH_ZS_CONTAINER_NAME)) {
     return -1;
+  }
 
   if (!open_or_create_container(create, true, &cguid_lc,
-				CEPH_ZS_LOG_CONTAINER_NAME))
+                                CEPH_ZS_LOG_CONTAINER_NAME)) {
     return -1;
+  }
 
   const char *log_device = ZSGetProperty(
       "ZS_FLOG_NVRAM_FILE", g_conf->bluestore_block_wal_path.c_str());
@@ -349,19 +348,18 @@ int ZSStore::do_open(ostream &out, int create)
     if (dev_log_fd <= 0)
       derr << "open failed" << strerror(errno) << dendl;
     dtrace << "do_open dev_log_fd=" << dev_log_fd << " name: " << log_device
-	   << dendl;
+     << dendl;
     assert(dev_log_fd >= 0);
   }
 
   dev_data_fd = ::open(ZSGetProperty("ZS_FLASH_FILENAME",
-				     g_conf->bluestore_block_db_path.c_str()),
-		       O_RDWR);
+             g_conf->bluestore_block_db_path.c_str()),
+           O_RDWR);
   if (dev_data_fd <= 0)
     derr << "open data failed" << strerror(errno) << dendl;
   dtrace << "do_open dev_data_fd=" << dev_data_fd << " data_path="
-	 << ZSGetProperty("ZS_FLASH_FILENAME",
-			  g_conf->bluestore_block_db_path.c_str())
-	 << dendl;
+         << ZSGetProperty("ZS_FLASH_FILENAME", g_conf->bluestore_block_db_path.c_str())
+         << dendl;
   assert(dev_data_fd >= 0);
 
   fm.init(cguid_lc, cguid);
@@ -395,7 +393,7 @@ int ZSStore::submit_transaction(KeyValueDB::Transaction t)
     } else if (op.first == ZSTransactionImpl::MERGE) {
       delete_ops.erase(op.second.first);
       write_ops[op.second.first] =
-	  _merge(op.second.first, write_ops[op.second.first], op.second.second);
+        _merge(op.second.first, write_ops[op.second.first], op.second.second);
     } else
       delete_ops.insert(op.second.first);
   }
@@ -423,10 +421,11 @@ int ZSStore::_submit_transaction_sync(KeyValueDB::Transaction tsync)
 int ZSStore::submit_transaction_sync(KeyValueDB::Transaction tsync)
 {
   /*dtrace << " writes=" << write_ops.size() << " del=" << delete_ops.size()
-	 << dendl;*/
+   << dendl;*/
 
   ++zs_num_thread_in_parallel;
-  dout(1) <<__func__ << " writes=" << write_ops.size() << " del=" << delete_ops.size() << " parallelism = " << zs_num_thread_in_parallel << dendl;
+  dout(1) <<__func__ << " writes=" << write_ops.size() << " del=" << delete_ops.size() 
+          << " parallelism = " << zs_num_thread_in_parallel << dendl;
   int r = _submit_transaction_sync(tsync);
 
   write_ops.clear();
@@ -440,9 +439,11 @@ int ZSStore::transaction_submit()
   if (write_ops.size() && _batch_set(write_ops))
     return -1;
 
-  for (auto &key : delete_ops)
-    if (_rmkey(key))
+  for (auto &key : delete_ops) {
+    if (_rmkey(key)) {
       return -1;
+    }
+  }
 
   return 0;
 }
@@ -464,13 +465,15 @@ int ZSStore::transaction_start()
 int ZSStore::transaction_commit()
 {
   int r = fdatasync(dev_data_fd);
-  if (r < 0)
+  if (r < 0) {
     derr << "fdatasync failed fd=" << dev_data_fd << " :" << strerror(errno)
-	 << dendl;
+         << dendl;
+  }
 
   ZS_status_t status = ZSTransactionCommit(_thd_state());
-  if (status != ZS_SUCCESS)
+  if (status != ZS_SUCCESS) {
     derr << "ZSTransactionCommit failed: " << ZSStrError(status) << dendl;
+  }
 
   dtrace << "ZSTransactionCommit: " << cguid << dendl;
 
@@ -478,7 +481,7 @@ int ZSStore::transaction_commit()
     r = fdatasync(dev_log_fd);
     if (r < 0)
       derr << "fdatasync failed fd=" << dev_log_fd << " :" << strerror(errno)
-	   << dendl;
+     << dendl;
   }
 
   return status == ZS_SUCCESS ? 0 : -1;
@@ -504,7 +507,7 @@ bool ZSStore::key_is_prefixed(const string &prefix, const string &full_key)
 }
 
 void ZSStore::ZSTransactionImpl::set(const string &prefix, const string &k,
-				     const bufferlist &to_set_bl)
+                                     const bufferlist &to_set_bl)
 {
   dtrace << " " << prefix << " " << decode_key(k) << dendl;
 
@@ -515,13 +518,14 @@ void ZSStore::ZSTransactionImpl::set(const string &prefix, const string &k,
 void ZSStore::ZSTransactionImpl::rmkey(const string &prefix, const string &k)
 {
   dtrace << " " << prefix << " " << decode_key(k) << " " << is_pglog(prefix, k)
-	 << " " << k.length() << dendl;
+   << " " << k.length() << dendl;
 
-  if (is_pglog(prefix, k))
+  if (is_pglog(prefix, k)) {
     pg_log_key = combine_strings(prefix, k, true);
-  else
+  } else {
     ops.push_back(make_pair(
-	DELETE, make_pair(combine_strings(prefix, k, true), bufferlist())));
+                   DELETE, make_pair(combine_strings(prefix, k, true), bufferlist())));
+  }
 }
 
 void ZSStore::ZSTransactionImpl::rmkeys_by_prefix(const string &prefix)
@@ -531,7 +535,7 @@ void ZSStore::ZSTransactionImpl::rmkeys_by_prefix(const string &prefix)
 }
 
 bufferlist ZSStore::_merge(const std::string &key, const bufferlist &_base,
-			   const bufferlist &value)
+         const bufferlist &value)
 {
   bufferlist rbase;
   std::string out;
@@ -544,28 +548,28 @@ bufferlist ZSStore::_merge(const std::string &key, const bufferlist &_base,
 
   /* 1. Use local, read from disk, value, when argument _base is empty
    * 2. Make _base contiguous if it's not */
-  const bufferlist &base =
-      !_base.length() ? rbase
-		      : (_base.is_contiguous() ? _base : bufferlist(_base));
+  const bufferlist &base = !_base.length() ? rbase
+          : (_base.is_contiguous() ? _base : bufferlist(_base));
 
   /* Make "value" contiguous, so we can use c_str() of front buffer later */
   const bufferlist &v =
       value.is_contiguous() && value.length() > 0 ? value : bufferlist(value);
 
   dtrace << " " << key << " " << base.length() << " " << value.length() << " "
-	 << dendl;
+   << dendl;
 
   for (auto &p : merge_ops) {
     if (!key_is_prefixed(p.first, key))
       continue;
 
     dtrace << " base: " << base.length() << " v: " << v.length() << dendl;
-    if (base.length())
+    if (base.length()) {
       p.second->merge(base.front().c_str(), base.length(),
-		      v.buffers().front().c_str(), v.length(), &out);
-    else
+                      v.buffers().front().c_str(), v.length(), &out);
+    } else {
       p.second->merge_nonexistent(v.buffers().front().c_str(), v.length(),
-				  &out);
+          &out);
+    }
   }
 
   bufferlist res;
@@ -574,8 +578,8 @@ bufferlist ZSStore::_merge(const std::string &key, const bufferlist &_base,
 }
 
 void ZSStore::ZSTransactionImpl::merge(const std::string &prefix,
-				       const std::string &k,
-				       const bufferlist &value)
+               const std::string &k,
+               const bufferlist &value)
 {
   ops.push_back(
       make_pair(MERGE, make_pair(combine_strings(prefix, k, true), value)));
@@ -584,8 +588,8 @@ void ZSStore::ZSTransactionImpl::merge(const std::string &prefix,
 #define WRITE_BATCH_SIZE 256
 
 static bool enqueue_obj(ZS_cguid_t cguid, ZS_obj_t *objs, uint32_t *i,
-			const char *key, uint32_t key_len, char *data,
-			uint64_t data_len)
+      const char *key, uint32_t key_len, char *data,
+      uint64_t data_len)
 {
   uint32_t objs_written, _i = *i;
 
@@ -598,7 +602,7 @@ static bool enqueue_obj(ZS_cguid_t cguid, ZS_obj_t *objs, uint32_t *i,
   *i = (*i + 1) % WRITE_BATCH_SIZE;
   if (!*i) {
     ZS_status_t status =
-	ZSMPut(_thd_state(), cguid, WRITE_BATCH_SIZE, objs, 0, &objs_written);
+             ZSMPut(_thd_state(), cguid, WRITE_BATCH_SIZE, objs, 0, &objs_written);
     if (status != ZS_SUCCESS)
       return false;
     assert(objs_written == WRITE_BATCH_SIZE);
@@ -628,11 +632,22 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
     unsigned int length = op.second.length();
 
     dtrace << " i=" << i << " l1=" << l1 << " " << decode_key(op.first) << "("
-	   << op.first.length() << ")"
-	   << " " << length << dendl;
+           << op.first.length() << ")"
+           << " " << length << dendl;
 
     if (op.first[0] == 'b') {
+      std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
       fm.write(op.first, op.second);
+
+      /*
+       * Write the logging key to logging container for fm.
+        */
+      if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
+           (*fm_log_key).length(), ptr, length)) {
+        fm.unlock();
+        assert(0);
+        return -1;
+      }
       continue;
     }
 
@@ -640,56 +655,59 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 
     if (lc) {
       if (!enqueue_obj(cguid_lc, objs_lc, &l1, op.first.c_str(),
-		       op.first.length(), ptr, length)) {
+                       op.first.length(), ptr, length)) {
         fm.unlock();
-	return -1;
+        assert(0);
+        return -1;
       }
       continue;
     }
 
     if (data_chunking == 0) {
       if (!enqueue_obj(cguid, objs, &i, op.first.c_str(), op.first.length(),
-		       ptr, length)) {
+           ptr, length)) {
             fm.unlock();
-	    return -1;
+        assert(0);
+        return -1;
         }
     } else {
       for (unsigned int j = 0;
-	   j < (length + CHUNK_SIZE - 1) / CHUNK_SIZE && j < MAX_CHUNK_COUNT;
-	   j++) {
-	if (j) {
-	  keys.resize(k + 1);
-	  keys[k] = op.first;
-	  append_chunk_number(keys[k], key_len, j);
-	  dtrace << keys[k] << dendl;
-	  key = (char *)keys[k].c_str();
-	  objs[i].key_len = key_len + 3;
-	  k++;
-	} else
-	  objs[i].key_len = key_len;
-
-	if (!enqueue_obj(cguid, objs, &i, key, objs[i].key_len,
-			 ptr + j * CHUNK_SIZE,
-			 (length - j * CHUNK_SIZE > CHUNK_SIZE &&
-			  j < MAX_CHUNK_COUNT - 1)
-			     ? CHUNK_SIZE
-			     : length - j * CHUNK_SIZE)) {
-            fm.unlock();
-	    return -1;
+           j < (length + CHUNK_SIZE - 1) / CHUNK_SIZE && j < MAX_CHUNK_COUNT;
+           j++) {
+        if (j) {
+          keys.resize(k + 1);
+          keys[k] = op.first;
+          append_chunk_number(keys[k], key_len, j);
+          dtrace << keys[k] << dendl;
+          key = (char *)keys[k].c_str();
+          objs[i].key_len = key_len + 3;
+          k++;
+        } else {
+          objs[i].key_len = key_len;
         }
 
-	if (!i) {
-	  k = 0;
-	  keys.clear();
-	}
+        if (!enqueue_obj(cguid, objs, &i, key, objs[i].key_len,
+               ptr + j * CHUNK_SIZE,
+             (length - j * CHUNK_SIZE > CHUNK_SIZE &&
+              j < MAX_CHUNK_COUNT - 1)
+               ? CHUNK_SIZE
+               : length - j * CHUNK_SIZE)) {
+          fm.unlock();
+          return -1;
+        }
+
+        if (!i) {
+          k = 0;
+          keys.clear();
+        }
       }
     }
   }
-  fm.flush();
+//  fm.flush(); 
   fm.unlock();
 
   if (i) {
-    for (int iter = 0; iter < i ; iter++) {
+    for (uint32_t iter = 0; iter < i ; iter++) {
       dtrace << "ZSMPut keys = " << decode_key(objs[iter].key) << dendl;
     }
     status = ZSMPut(_thd_state(), cguid, i, objs, 0, &objs_written);
@@ -697,19 +715,18 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
   }
 
   if (l1) {
+    for (uint32_t iter = 0; iter < l1 ; iter++) {
+      dtrace << "ZSMPut loggong cont keys = " << decode_key(objs_lc[iter].key)  << "key = " << objs_lc[iter].key << dendl;
+    }
     status = ZSMPut(_thd_state(), cguid_lc, l1, objs_lc, 0, &objs_written);
     assert(status != ZS_SUCCESS || objs_written == l1);
   }
 
   dtrace << "ZSMPut flush=" << i << " l1=" << l1
-	 << " status=" << ZSStrError(status) << dendl;
+         << " status=" << ZSStrError(status) << dendl;
 
   if (status != ZS_SUCCESS)
     derr << "ZSMPut flush=" << ZSStrError(status) << dendl;
-
-
-
-
 
   return status == ZS_SUCCESS ? 0 : -1;
 }
@@ -734,8 +751,8 @@ int ZSStore::_batch_set_orig(const ZSStore::ZSMultiMap &ops)
     unsigned int length = op.second.length();
 
     dtrace << " i=" << i << " l1=" << l1 << " " << decode_key(op.first) << "("
-	   << op.first.length() << ")"
-	   << " " << length << dendl;
+     << op.first.length() << ")"
+     << " " << length << dendl;
 
     if (op.first[0] == 'b') {
       fm.write(op.first, op.second);
@@ -746,42 +763,42 @@ int ZSStore::_batch_set_orig(const ZSStore::ZSMultiMap &ops)
 
     if (lc) {
       if (!enqueue_obj(cguid_lc, objs_lc, &l1, op.first.c_str(),
-		       op.first.length(), ptr, length))
-	return -1;
+           op.first.length(), ptr, length))
+  return -1;
       continue;
     }
 
     if (length > 4096) {
       if (!enqueue_obj(cguid, objs, &i, op.first.c_str(), op.first.length(),
-		       ptr, length))
-	return -1;
+           ptr, length))
+  return -1;
     } else {
       for (unsigned int j = 0;
-	   j < (length + CHUNK_SIZE - 1) / CHUNK_SIZE && j < MAX_CHUNK_COUNT;
-	   j++) {
-	if (j) {
-	  keys.resize(k + 1);
-	  keys[k] = op.first;
-	  append_chunk_number(keys[k], key_len, j);
-	  dtrace << keys[k] << dendl;
-	  key = (char *)keys[k].c_str();
-	  objs[i].key_len = key_len + 3;
-	  k++;
-	} else
-	  objs[i].key_len = key_len;
+     j < (length + CHUNK_SIZE - 1) / CHUNK_SIZE && j < MAX_CHUNK_COUNT;
+     j++) {
+  if (j) {
+    keys.resize(k + 1);
+    keys[k] = op.first;
+    append_chunk_number(keys[k], key_len, j);
+    dtrace << keys[k] << dendl;
+    key = (char *)keys[k].c_str();
+    objs[i].key_len = key_len + 3;
+    k++;
+  } else
+    objs[i].key_len = key_len;
 
-	if (!enqueue_obj(cguid, objs, &i, key, objs[i].key_len,
-			 ptr + j * CHUNK_SIZE,
-			 (length - j * CHUNK_SIZE > CHUNK_SIZE &&
-			  j < MAX_CHUNK_COUNT - 1)
-			     ? CHUNK_SIZE
-			     : length - j * CHUNK_SIZE))
-	  return -1;
+  if (!enqueue_obj(cguid, objs, &i, key, objs[i].key_len,
+       ptr + j * CHUNK_SIZE,
+       (length - j * CHUNK_SIZE > CHUNK_SIZE &&
+        j < MAX_CHUNK_COUNT - 1)
+           ? CHUNK_SIZE
+           : length - j * CHUNK_SIZE))
+    return -1;
 
-	if (!i) {
-	  k = 0;
-	  keys.clear();
-	}
+  if (!i) {
+    k = 0;
+    keys.clear();
+  }
       }
     }
   }
@@ -797,7 +814,7 @@ int ZSStore::_batch_set_orig(const ZSStore::ZSMultiMap &ops)
   }
 
   dtrace << "ZSMPut flush=" << i << " l1=" << l1
-	 << " status=" << ZSStrError(status) << dendl;
+   << " status=" << ZSStrError(status) << dendl;
 
   if (status != ZS_SUCCESS)
     derr << "ZSMPut flush=" << ZSStrError(status) << dendl;
@@ -815,7 +832,7 @@ int ZSStore::_rmkey(const std::string &_key)
   if (is_logging_prefixed(_key)) {
     dtrace << "ZSDeleteObject(lcrm): [" << decode_key(_key) << "]" << dendl;
     status = ZSWriteObject(_thd_state(), cguid_lc, _key.c_str(), _key.length(),
-			   "", 1, ZS_WRITE_TRIM);
+                           "", 1, ZS_WRITE_TRIM);
   } else {
     std::string key(_key);
     int key_len = key.length();
@@ -823,12 +840,14 @@ int ZSStore::_rmkey(const std::string &_key)
     for (unsigned int i = 0; i < MAX_CHUNK_COUNT; i++) {
       dtrace << "ZSDeleteObject: [" << decode_key(key) << "]" << i << dendl;
 
-      if (i)
-	append_chunk_number(key, key_len, i);
+      if (i) {
+        append_chunk_number(key, key_len, i);
+      }
 
       status = ZSDeleteObject(_thd_state(), cguid, key.c_str(), key.length());
-      if (status == ZS_OBJECT_UNKNOWN)
-	break;
+      if (status == ZS_OBJECT_UNKNOWN) {
+        break;
+      }
     }
   }
 
@@ -853,10 +872,11 @@ int ZSStore::_get(const string &key, bufferlist *out)
     uint64_t datalen;
     char *dataw;
     ZS_status_t status = ZSReadObject(_thd_state(), cguid_lc, key.c_str(),
-				      key.length(), &dataw, &datalen);
+                                      key.length(), &dataw, &datalen);
     dtrace << "ZSReadObject logging: [" << status << "]" << datalen << dendl;
-    if (status == ZS_SUCCESS)
+    if (status == ZS_SUCCESS) {
       out->push_back(buffer::claim_malloc(datalen, dataw));
+    }
 
     return status == ZS_SUCCESS ? 0 : -EIO;
   }
@@ -901,8 +921,8 @@ int ZSStore::_get(const string &key, bufferlist *out)
       ZSGetNextRange(_thd_state(), cursor, MAX_CHUNK_COUNT, &n_out, values);
 
   dtrace << " key_start=" << decode_key(key) << "(" << key.length()
-	 << ") key_end=" << decode_key(key_end) << "(" << key_end.length()
-	 << ") status=" << status << " n_out=" << n_out << dendl;
+   << ") key_end=" << decode_key(key_end) << "(" << key_end.length()
+   << ") status=" << status << " n_out=" << n_out << dendl;
 
   if (status == ZS_SUCCESS) {
     for (int i = 0; i < n_out; i++)
@@ -923,7 +943,7 @@ int ZSStore::_get(const string &key, bufferlist *out)
 }
 
 int ZSStore::get(const string &prefix, const std::set<string> &keys,
-		 std::map<string, bufferlist> *out)
+     std::map<string, bufferlist> *out)
 {
   for (const auto &key : keys) {
     bufferlist bl;
@@ -935,8 +955,8 @@ int ZSStore::get(const string &prefix, const std::set<string> &keys,
 }
 
 int ZSStore::ZSWholeSpaceIteratorImpl::split_key(const char *pkey,
-						 uint32_t pkey_len,
-						 string *prefix, string *key)
+                                                 uint32_t pkey_len,
+                                                 string *prefix, string *key)
 {
   char *separator = (char *)memchr(pkey, 0, pkey_len);
   if (separator == NULL)
@@ -982,7 +1002,7 @@ void ZSStore::ZSWholeSpaceIteratorImpl::finish()
 }
 
 int ZSStore::ZSWholeSpaceIteratorImpl::seek(const char *key, uint32_t length,
-					    bool _direction, bool inclusive)
+              bool _direction, bool inclusive)
 {
   ZS_status_t status;
   std::string skey(key, length);
@@ -1018,12 +1038,13 @@ int ZSStore::ZSWholeSpaceIteratorImpl::seek(const char *key, uint32_t length,
   if (key) {
     if (direction)
       meta.flags =
-	  (ZS_range_enums_t)(inclusive ? ZS_RANGE_START_GE : ZS_RANGE_START_GT);
+        (ZS_range_enums_t)(inclusive ? ZS_RANGE_START_GE : ZS_RANGE_START_GT);
     else {
       meta.flags =
-	  (ZS_range_enums_t)(inclusive ? ZS_RANGE_START_LE : ZS_RANGE_START_LT);
-      if (inclusive)
-	append_chunk_number(skey, skey.length(), MAX_CHUNK_COUNT);
+        (ZS_range_enums_t)(inclusive ? ZS_RANGE_START_LE : ZS_RANGE_START_LT);
+      if (inclusive) {
+        append_chunk_number(skey, skey.length(), MAX_CHUNK_COUNT);
+      }
       meta.key_start = (char *)skey.c_str();
       meta.keylen_start = skey.length();
     }
@@ -1043,8 +1064,8 @@ int ZSStore::ZSWholeSpaceIteratorImpl::seek(const char *key, uint32_t length,
       ZSGetRange(_thd_state(), cguid, ZS_RANGE_PRIMARY_INDEX, &cursor, &meta);
 
   dtrace << " " << cguid << " " << inclusive << " " << direction << " ["
-	 << decode_key(key ? key : smallest) << "] " << snap_seqno
-	 << " length: " << length << dendl;
+   << decode_key(key ? key : smallest) << "] " << snap_seqno
+   << " length: " << length << dendl;
 
   if (status != ZS_SUCCESS) {
     derr << "ZSGetRange failed: " << ZSStrError(status) << dendl;
@@ -1067,8 +1088,7 @@ int ZSStore::ZSWholeSpaceIteratorImpl::_next()
     uint32_t keylen;
     uint64_t datalen;
 
-    status = ZSNextEnumeratedObject(_thd_state(), lc_it, &ekey, &keylen, &data,
-				    &datalen);
+    status = ZSNextEnumeratedObject(_thd_state(), lc_it, &ekey, &keylen, &data, &datalen);
     if (status == ZS_SUCCESS) {
       char *p = strchr(ekey + 2, '_') + 1;
       cur_key.append(p, keylen - (p - ekey));
@@ -1095,7 +1115,7 @@ int ZSStore::ZSWholeSpaceIteratorImpl::_next()
     return -1;
 
   status = ZSGetNextRange(_thd_state(), cursor, MAX_CHUNK_COUNT - count, &n_out,
-			  values + count);
+        values + count);
   n_out += count;
 
   bool _valid = (status == ZS_SUCCESS || status == ZS_QUERY_DONE) && n_out > 0;
@@ -1116,10 +1136,10 @@ int ZSStore::ZSWholeSpaceIteratorImpl::_next()
     key += '\0';
     int i = 1;
     while (i < n_out && values[i].keylen == key.length() + 2 &&
-	   !memcmp(key.c_str(), values[i].key, key.length())) {
+           !memcmp(key.c_str(), values[i].key, key.length())) {
       value_bl.append(buffer::claim_malloc(values[i].datalen, values[i].data));
       dtrace << "key=" << decode_key(string(values[i].key, values[i].keylen))
-	     << dendl;
+       << dendl;
       free(values[i].key);
       i++;
     }
@@ -1182,13 +1202,11 @@ ZSStore::ZSWholeSpaceIteratorImpl::~ZSWholeSpaceIteratorImpl()
 
     status = ZSDeleteContainerSnapshot(_thd_state(), cguid, snap_seqno);
     if (status != ZS_SUCCESS)
-      derr << "ZSDeleteContainerSnapshot failed: " << ZSStrError(status)
-	   << dendl;
+      derr << "ZSDeleteContainerSnapshot failed: " << ZSStrError(status) << dendl;
 
     status = ZSDeleteContainerSnapshot(_thd_state(), cguid_lc, snap_seqno);
     if (status != ZS_SUCCESS)
-      derr << "ZSDeleteContainerSnapshot failed: " << ZSStrError(status)
-	   << dendl;
+      derr << "ZSDeleteContainerSnapshot failed: " << ZSStrError(status) << dendl;
   }
 }
 
@@ -1201,7 +1219,7 @@ KeyValueDB::WholeSpaceIterator ZSStore::_get_snapshot_iterator()
   if (status != ZS_SUCCESS) {
     derr << "ZSCreateContainerSnapshot failed: " << ZSStrError(status) << dendl;
     derr << "Fallback to regular iterator instead of snapshot iterator"
-	 << dendl;
+   << dendl;
     snap_seqno = 0;
   }
 
@@ -1209,8 +1227,7 @@ KeyValueDB::WholeSpaceIterator ZSStore::_get_snapshot_iterator()
   if (status != ZS_SUCCESS) {
     ZSDeleteContainerSnapshot(_thd_state(), cguid, snap_seqno);
     derr << "ZSCreateContainerSnapshot failed: " << ZSStrError(status) << dendl;
-    derr << "Fallback to regular iterator instead of snapshot iterator"
-	 << dendl;
+    derr << "Fallback to regular iterator instead of snapshot iterator" << dendl;
     snap_seqno = 0;
   }
 
@@ -1221,7 +1238,7 @@ KeyValueDB::WholeSpaceIterator ZSStore::_get_snapshot_iterator()
 }
 
 int ZSStore::ZSWholeSpaceIteratorImpl::upper_bound(const std::string &prefix,
-						   const std::string &after)
+               const std::string &after)
 {
   string k = combine_strings(prefix, after, false);
   dtrace << "upper_bound " << decode_key(k) << dendl;
@@ -1229,7 +1246,7 @@ int ZSStore::ZSWholeSpaceIteratorImpl::upper_bound(const std::string &prefix,
 }
 
 int ZSStore::ZSWholeSpaceIteratorImpl::lower_bound(const std::string &prefix,
-						   const std::string &to)
+               const std::string &to)
 {
   string k = combine_strings(prefix, to, false);
   dtrace << "lower_bound " << decode_key(k) << dendl;
@@ -1254,6 +1271,7 @@ int deserialize(char *buf, int ptr, bufferlist &data)
 void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 {
 #define RECOVERY_BATCH_SIZE 32
+#define MAX_FM_LOGS 256
   string key_end;
   ZS_range_meta_t meta;
   ZS_range_data_t values[RECOVERY_BATCH_SIZE];
@@ -1264,6 +1282,14 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
   cguid = _cguid;
   pthread_mutex_init(&wlock,NULL);
   enable_lock=1;
+
+  /*
+   * Init the fm logging related fields.
+   */
+  log_lsn_last = 1;
+  log_lsn_first = 1;
+  pending_logs.resize(MAX_FM_LOGS, std::string("", 0));
+  
 
   dtrace << "fm recovery" << dendl;
 
@@ -1282,7 +1308,7 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 
   int n_out;
   while ((status = ZSGetNextRange(_thd_state(), cursor, RECOVERY_BATCH_SIZE,
-				  &n_out, values)) == ZS_SUCCESS) {
+                                  &n_out, values)) == ZS_SUCCESS) {
     dtrace << " status=" << status << " n_out=" << n_out << dendl;
     while (n_out--) {
       char *data = values[n_out].data;
@@ -1290,8 +1316,9 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 
       dtrace << " apply lsn=" << plsn << dendl;
 
-      if (lsn < plsn)
-	lsn = plsn;
+      if (lsn < plsn) {
+        lsn = plsn;
+      }
 
       uint16_t log_size = *(uint16_t *)(data + 8);
       data += 10;
@@ -1299,24 +1326,25 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
       dtrace << " apply log_size=" << log_size << dendl;
 
       while (log_size) {
-	std::string key;
+        std::string key;
 
-	int ptr = deserialize(data, 0, key);
+        int ptr = deserialize(data, 0, key);
 
-	dtrace << " apply log rec key=" << decode_key(key)
-	       << " log_size=" << log_size << dendl;
-	dtrace << " ptr=" << ptr << dendl;
+        dtrace << " apply log rec key=" << decode_key(key)
+               << " log_size=" << log_size << dendl;
+        dtrace << " ptr=" << ptr << dendl;
 
-	if (lsn_map[key] <= plsn) {
-	  ptr = deserialize(data, ptr, freelist[key]);
-	  lsn_map[key] = plsn;
-	} else
-	  ptr += *(uint8_t *)(data + ptr);
+        if (lsn_map[key] <= plsn) {
+          ptr = deserialize(data, ptr, freelist[key]);
+          lsn_map[key] = plsn;
+        } else {
+          ptr += *(uint8_t *)(data + ptr);
+        }
 
-	dtrace << " ptr=" << ptr << dendl;
+        dtrace << " ptr=" << ptr << dendl;
 
-	data += ptr;
-	log_size -= ptr;
+        data += ptr;
+        log_size -= ptr;
       }
 
       uint16_t data_size = *(uint16_t *)data;
@@ -1325,24 +1353,29 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 
       data += 2;
       while (data_size) {
-	std::string key;
+        std::string key;
 
-	int ptr = deserialize(data, 0, key);
+        int ptr = deserialize(data, 0, key);
 
-	dtrace << " apply key=" << decode_key(key) << " data_size=" << data_size
-	       << dendl;
+        dtrace << " apply key=" << decode_key(key) << " data_size=" << data_size
+               << dendl;
 
-	if (lsn_map[key] <= plsn) {
-	  ptr = deserialize(data, ptr, freelist[key]);
-	  lsn_map[key] = plsn;
-	} else
-	  ptr += *(uint8_t *)(data + ptr);
+        if (lsn_map[key] <= plsn) {
+          ptr = deserialize(data, ptr, freelist[key]);
+          lsn_map[key] = plsn;
+        } else {
+          ptr += *(uint8_t *)(data + ptr);
+        }
 
-	data += ptr;
-	data_size -= ptr;
+        data += ptr;
+        data_size -= ptr;
       }
     }
   }
+
+  // Recover the fm logs
+  patch_fm_logs();
+
 
   ZS_status_t status1 = ZSGetRangeFinish(_thd_state(), cursor);
   if (status1 != ZS_SUCCESS)
@@ -1352,23 +1385,24 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 
   dtrace << "fm recovery finish. freelist size=" << freelist.size() << dendl;
 }
+
 void ZSFreeListManager::lock(void) 
 {
-    if (enable_lock == 1) {
-        pthread_mutex_lock(&wlock);
-    }
+  if (enable_lock == 1) {
+      pthread_mutex_lock(&wlock);
+  }
 }
 void ZSFreeListManager::unlock(void) 
 {
-    if (enable_lock == 1) {
-        pthread_mutex_unlock(&wlock);
-    }
+  if (enable_lock == 1) {
+      pthread_mutex_unlock(&wlock);
+  }
 }
 
 void ZSFreeListManager::get(const std::string &key, bufferlist *data)
 {
   dtrace << "fm key: " << decode_key(key) << " " << decode_data(freelist[key])
-	 << dendl;
+   << dendl;
 
   data->clear();
   data->append(freelist[key]);
@@ -1383,15 +1417,103 @@ int serialize(char *buf, int ptr, const char *val, int len)
   return ptr + len;
 }
 
+std::string ZSFreeListManager::log_key_to_key(std::string log_key)
+{
+  int first_delim = log_key.find('_', 0);
+  int second_delim = log_key.find('_', first_delim + 1);
+
+  return log_key.substr(second_delim + 1, string::npos);
+}
+
+std::string ZSFreeListManager::key_to_log_key(std::string key)
+{
+  return (std::to_string(log_lsn_last) + "_" + std::to_string(log_pg_id) + "_" + key);
+}
+
+std::string* ZSFreeListManager::add_pending_fm_logs(const std::string key)
+{
+  std::string fm_key = std::to_string(log_lsn_last) + "_" + std::to_string(log_pg_id) + "_" + key;
+  dtrace << "Adding FM log record for key = " << decode_key(key) << " fm_key = " << fm_key << dendl;
+
+  return add_pending_fm_logs_int(fm_key);
+}
+
+std::string* ZSFreeListManager::add_pending_fm_logs_int(const std::string fm_key)
+{
+  pending_logs[log_num_items] = fm_key; 
+
+  std::string * fm_keyp = &pending_logs[log_num_items];
+
+  log_num_items++;
+  log_lsn_last++;
+
+  assert(log_num_items < pending_logs.size());
+  return fm_keyp;
+}
+
+void ZSFreeListManager::trim_pending_fm_logs()
+{
+  dtrace << "Trimming FM log " << log_num_items << "record" << dendl;
+
+  ZS_status_t ret = ZSWriteObject(_thd_state(), cguid_lc,
+                                  pending_logs[log_num_items - 1].c_str(), pending_logs[log_num_items - 1].length(), 
+                                  "", 1, ZS_WRITE_TRIM);
+
+  assert(ret == ZS_SUCCESS);
+
+  log_lsn_first = log_lsn_last;
+  log_num_items = 0;
+}
+
+void ZSFreeListManager::patch_fm_logs()
+{
+  
+  ZS_status_t status = ZS_SUCCESS;
+  struct ZS_iterator *lc_it = NULL;
+  char *key = NULL;
+  uint32_t keylen = 0;
+  char *data = NULL;
+  uint64_t datalen = 0;
+
+  dout(10) << " Patching up FM log records on recovery." << dendl;
+
+  std::string fm_key = std::to_string(0) + "_" + std::to_string(log_pg_id);
+
+  status = ZSEnumeratePGObjects(_thd_state(), cguid_lc, &lc_it, (char *) fm_key.c_str(), fm_key.length());
+  assert(status == ZS_SUCCESS);
+
+  dtrace << " Patch enumeration with key prefix " << fm_key << dendl;
+
+  while ((status = ZSNextEnumeratedObject(_thd_state(), lc_it, &key, &keylen, &data,
+            &datalen)) == ZS_SUCCESS) {
+
+    std::string s_log_key(key, keylen);
+    bufferlist b1;
+ 
+    b1.append(data, datalen);
+
+    std::string s_key = log_key_to_key(s_log_key);
+
+    dtrace << "Got log key =  " << s_log_key <<" key = " << decode_key(s_key)  << dendl;
+
+    add_pending_fm_logs(s_key);
+    write(s_key, b1);
+  }
+
+  ZSFinishEnumeration(_thd_state(), lc_it);
+  dout(10) << " Patching  FM log records on recovery DONE." << dendl;
+}
+
 void ZSFreeListManager::flush()
 {
   ZS_status_t status;
 
-  if (!log_ptr)
+  if (!log_ptr) {
     return;
+  }
 
   uint64_t bytes_per_key =
-      g_conf->bdev_block_size * g_conf->bluestore_freelist_blocks_per_key;
+    g_conf->bdev_block_size * g_conf->bluestore_freelist_blocks_per_key;
 
   /* Update the size of the log part and LSN in the beginning of the page */
   lsn++;
@@ -1402,14 +1524,14 @@ void ZSFreeListManager::flush()
   page_ptr += 2;
 
   if (fl_it == freelist.end())
-    fl_it = freelist.begin();
+  fl_it = freelist.begin();
 
   uint64_t offset;
   _key_decode_u64(fl_it->first.c_str() + 1, &offset);
 
   dtrace << "write freelist chunk. offset=" << offset << " lsn=" << lsn
-	 << " fm size:" << freelist.size()
-	 << " bytes per key: " << bytes_per_key << dendl;
+   << " fm size:" << freelist.size()
+   << " bytes per key: " << bytes_per_key << dendl;
 
   uint64_t page_num = offset / bytes_per_key / n_recs_per_page;
   for (int i = 0; i < n_recs_per_page && fl_it != freelist.end(); i++) {
@@ -1418,13 +1540,13 @@ void ZSFreeListManager::flush()
       break;
 
     page_ptr =
-	serialize(page, page_ptr, fl_it->first.c_str(), fl_it->first.length());
+      serialize(page, page_ptr, fl_it->first.c_str(), fl_it->first.length());
     page_ptr = serialize(page, page_ptr, fl_it->second.c_str(),
-			 fl_it->second.length());
+       fl_it->second.length());
 
     dtrace << "page_ptr: " << page_ptr
-	   << " data_part: " << page_ptr - page_head_ptr - 2 << " "
-	   << decode_key(fl_it->first.c_str()) << dendl;
+     << " data_part: " << page_ptr - page_head_ptr - 2 << " "
+     << decode_key(fl_it->first.c_str()) << dendl;
     fl_it++;
   }
 
@@ -1438,7 +1560,7 @@ void ZSFreeListManager::flush()
   key[21] = 0;
 
   dtrace << "fm chunk page key: " << key << " len=" << strlen(key)
-	 << " page_ptr: " << page_ptr << dendl;
+   << " page_ptr: " << page_ptr << dendl;
 
   status = ZSWriteObject(_thd_state(), cguid, key, 22, page, page_ptr, 0);
   if (status != ZS_SUCCESS)
@@ -1451,21 +1573,24 @@ void ZSFreeListManager::flush()
 int ZSFreeListManager::write(const std::string &key, const bufferlist &data)
 {
   dtrace << "fm write key: " << decode_key(key) << " " << decode_data(data)
-	 << " Len:" << data.length() << dendl;
+   << " Len:" << data.length() << dendl;
 
   freelist[key] = data;
 
-  if (log_ptr >= n_log_rec_per_page)
+  if (log_ptr >= n_log_rec_per_page) {
+    dtrace << "Flush fm page" << dendl;
     flush();
+
+    trim_pending_fm_logs();
+  }
 
   page_ptr = serialize(page, page_ptr, key.c_str(), key.length());
   page_ptr = serialize(page, page_ptr, data.front().c_str(), data.length());
 
   dtrace << "log rec size " << key.length() << " " << data.length()
-	 << " page_ptr: " << page_ptr << dendl;
+   << " page_ptr: " << page_ptr << dendl;
 
   log_ptr++;
-
   return 0;
 }
 
@@ -1477,7 +1602,7 @@ bool ZSFreeListManager::seek(const std::string &key, bool inclusive)
     seek_iter = freelist.upper_bound(key);
 
   dtrace << " fm seek " << decode_key(key) << " "
-	 << (seek_iter != freelist.end()) << dendl;
+   << (seek_iter != freelist.end()) << dendl;
 
   if (seek_iter != freelist.end()) {
     return true;
@@ -1493,7 +1618,7 @@ bool ZSFreeListManager::next(std::string &key, bufferlist &data)
     seek_iter++;
 
     dtrace << "fm next: " << decode_key(key) << " " << decode_data(data)
-	   << dendl;
+     << dendl;
 
     return true;
   }
