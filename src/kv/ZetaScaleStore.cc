@@ -256,7 +256,7 @@ int ZSStore::_init(bool format)
   ZSSetProperty("ZS_NVR_LENGTH", str_buf);
 
   // ZS_NVR_LENGTH/ZS_NVR_PARTITIONS/ZS_MAX_NUM_LC/ZS_NVR_OBJECT_SIZE
-  int num_part = size / 2 / (16 / 2) / 65536;
+  int num_part = 2;
 
   dinfo << "ZS log partition size is set to " << size
         << ", num internal nvram partitions= " << num_part << dendl;
