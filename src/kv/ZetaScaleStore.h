@@ -14,6 +14,7 @@
 #include "include/buffer.h"
 #include "include/encoding.h"
 #include "include/memory.h"
+#include <mutex>
 
 #include "zs/api/zs.h"
 
@@ -83,6 +84,31 @@ class ZSFreeListManager
   ~ZSFreeListManager() {}
 };
 
+class ZS_wal_logs {
+  std::mutex m_lock;
+  int64_t lsn = 0;
+  ZS_cguid_t wal_log_cont_id = -1;
+  std::map<std::string, std::pair<int64_t, bufferlist>> wal_key_to_seq;
+
+public:
+  static int64_t wal_log_pgid;
+  ZS_wal_logs() {
+    lsn = 0;
+  }
+
+  void init(ZS_cguid_t cguid);
+  void write_int(std::string &key, int64_t seq, bufferlist bl);
+  int64_t write(std::string &key, bufferlist bl);
+  bool read(const std::string &key, bufferlist *bl);
+  bool remove(const std::string &key);
+  int64_t get_seqno(const std::string &key);
+
+  static bool is_wal_key(const std::string &key);
+  static std::string wal_key_to_log_key(const std::string &key, int64_t seqno);
+  static std::string wal_log_key_to_key(const std::string &key, int64_t *seqno);
+};
+
+
 class ZSStore : public KeyValueDB
 {
   const char *default_cache_size = "1073741824";  // 1Gb
@@ -91,6 +117,7 @@ class ZSStore : public KeyValueDB
   void *priv;
 
   ZSFreeListManager fm;
+  ZS_wal_logs wal_logs;
   string db_path;
   string options;
   int dev_log_fd, dev_data_fd;

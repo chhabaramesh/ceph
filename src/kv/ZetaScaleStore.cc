@@ -42,6 +42,7 @@ using std::string;
 #define dwarn dout(0)
 #define dinfo dout(0)
 
+int64_t ZS_wal_logs::wal_log_pgid = -6666;
 
 thread_local ZSStore::ZSMultiMap ZSStore::write_ops;
 thread_local std::set<std::string> ZSStore::delete_ops;
@@ -375,6 +376,7 @@ int ZSStore::do_open(ostream &out, int create)
   assert(dev_data_fd >= 0);
 
   fm.init(cguid_lc, cguid);
+  wal_logs.init(cguid_lc);
 
   return 0;
 }
@@ -642,15 +644,30 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 	   << " " << length << dendl;
 
     if (op.first[0] == 'b') {
-      std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
       fm.write(op.first, op.second);
+			std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
+			/*
+			 * Write the logging key to logging container for fm.
+			 */
+			if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
+					 (*fm_log_key).length(), ptr, length)) {
+				fm.unlock();
+				assert(0);
+				return -1;
+			}
+      continue;
+    }
 
+
+    std::string tmp_key = op.first;
+    if (ZS_wal_logs::is_wal_key(tmp_key)) {
+      int64_t seq_no = wal_logs.write(tmp_key, op.second); // no need to read data from here
+      std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(op.first, seq_no);
       /*
        * Write the logging key to logging container for fm.
        */
-      if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
-           (*fm_log_key).length(), ptr, length)) {
-        fm.unlock();
+      if (!enqueue_obj(cguid_lc, objs_lc, &l1, wal_log_key.c_str(),
+           wal_log_key.length(), ptr, length)) {
         assert(0);
         return -1;
       }
@@ -707,11 +724,11 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
       }
     }
   }
-  //fm.flush();
+  //  fm.flush();
   fm.unlock();
 
   if (i) {
-    for (int iter = 0; iter < i ; iter++) {
+    for (uint32_t iter = 0; iter < i ; iter++) {
       dtrace << "ZSMPut keys = " << decode_key(objs[iter].key) << dendl;
     }
     status = ZSMPut(_thd_state(), cguid, i, objs, 0, &objs_written);
@@ -837,7 +854,18 @@ int ZSStore::_rmkey(const std::string &_key)
 {
   ZS_status_t status;
 
-  if (is_logging_prefixed(_key)) {
+  /*
+   * Check for wal key first.
+   */
+  if (ZS_wal_logs::is_wal_key(_key)) {
+    int64_t seqno = wal_logs.get_seqno(_key);
+    std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(_key, seqno);
+
+    wal_logs.remove(_key);
+    dtrace << "ZSDeleteObject(wal_log): [" << decode_key(wal_log_key) << "]" << dendl;
+    status = ZSWriteObject(_thd_state(), cguid_lc, wal_log_key.c_str(), wal_log_key.length(),
+			   "", 1, ZS_WRITE_TRIM);
+  } else if (is_logging_prefixed(_key)) {
     dtrace << "ZSDeleteObject(lcrm): [" << decode_key(_key) << "]" << dendl;
     status = ZSWriteObject(_thd_state(), cguid_lc, _key.c_str(), _key.length(),
 			   "", 1, ZS_WRITE_TRIM);
@@ -871,6 +899,14 @@ int ZSStore::_get(const string &key, bufferlist *out)
   if (key[0] == 'b')  // bitmap freelist manager
   {
     fm.get(key, out);
+    return 0;
+  }
+
+  if (ZS_wal_logs::is_wal_key(key)) {
+    if (!wal_logs.read(key, out)) {
+      assert(0);
+      return -1;
+    }
     return 0;
   }
 
@@ -1299,7 +1335,7 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
   pending_logs.resize(MAX_FM_LOGS, std::string("", 0));
   
 
-  dtrace << "fm recovery" << dendl;
+  dtrace << "freelist manager recovery" << dendl;
 
   memset(&meta, 0, sizeof(meta));
 
@@ -1381,7 +1417,7 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
   /*
    * Patch entries ub fm logs. All entries are valid/idempotent here since we remove them once written to tree.
    */   
-  patch_fm_logs();
+	patch_fm_logs();
 
   ZS_status_t status1 = ZSGetRangeFinish(_thd_state(), cursor);
   if (status1 != ZS_SUCCESS)
@@ -1528,7 +1564,7 @@ void ZSFreeListManager::patch_fm_logs()
     write(key, bl);
   }
 
-  dout(10) << " Patching  FM log records on recovery DONE." << dendl;
+  dout(10) << " Patching " << log_recs.size() << " FM log records on recovery DONE." << dendl;
 }
 
 void ZSFreeListManager::flush()
@@ -1653,3 +1689,122 @@ bool ZSFreeListManager::next(std::string &key, bufferlist &data)
 }
 
 void ZSFreeListManager::finish() { seek_iter = freelist.end(); }
+
+
+/*
+ * ZS wal logs functions.
+ */
+void ZS_wal_logs::init(ZS_cguid_t cguid)
+{
+  std::lock_guard<std::mutex> l(m_lock);
+  ZS_status_t status = ZS_SUCCESS;
+	struct ZS_iterator *lc_it = NULL;
+  char *key = NULL;
+  uint32_t keylen = 0;
+  char *data = NULL;
+  uint64_t datalen = 0;
+  int64_t max_seq = 0;
+  
+  wal_log_cont_id = cguid;
+
+  std::map<int64_t, std::pair <std::string, bufferlist>> log_recs;
+  //log_recs.reserve(100);
+
+  dout(10) << " Recovering WAL log records on recovery." << dendl;
+
+
+  std::string tmp_key = "";
+  std::string fm_key = ZS_wal_logs::wal_key_to_log_key(tmp_key, 0);
+
+  status = ZSEnumeratePGObjects(_thd_state(), cguid, &lc_it, (char *) fm_key.c_str(), fm_key.length());
+  assert(status == ZS_SUCCESS);
+
+  dtrace << " Patch enumeration with key prefix " << fm_key << dendl;
+
+  while ((status = ZSNextEnumeratedObject(_thd_state(), lc_it, &key, &keylen, &data,
+            &datalen)) == ZS_SUCCESS) {
+
+    const std::string s_log_key(key, keylen);
+    bufferlist bl;
+    int64_t seq = 0;
+ 
+    bl.append(data, datalen);
+
+    std::string s_key = ZS_wal_logs::wal_log_key_to_key(s_log_key, &seq);
+    if (get_seqno(s_key) < seq) {
+      write_int(s_key, seq, bl);
+    }
+    max_seq = MAX(seq, max_seq);
+    dtrace << "Got log key =  " << s_log_key <<" key = " << decode_key(s_key)  << dendl;
+  }
+
+  ZSFinishEnumeration(_thd_state(), lc_it);
+  lsn = MAX(max_seq + 1, lsn);
+
+  dout(10) << " Recovering WAL log records on recovery DONE." << dendl;
+}
+
+bool ZS_wal_logs::read(const std::string &key, bufferlist *out)
+{
+  std::lock_guard<std::mutex> l(m_lock);
+  if (wal_key_to_seq.find(key) == wal_key_to_seq.end()) {
+    return false;
+  }
+  *out = wal_key_to_seq[key].second; 
+  return true;
+}
+
+int64_t ZS_wal_logs::get_seqno(const std::string &key)
+{
+  std::lock_guard<std::mutex> l(m_lock);
+  if (wal_key_to_seq.find(key) == wal_key_to_seq.end()) {
+    return -1;
+  }
+  return wal_key_to_seq[key].first;
+}
+
+void ZS_wal_logs::write_int(std::string &key, int64_t seq, bufferlist bl)
+{
+  auto p = std::make_pair(seq, bl);
+  wal_key_to_seq[key] = p;
+}
+
+int64_t ZS_wal_logs::write(std::string &key, bufferlist bl)
+{
+  std::lock_guard<std::mutex> l(m_lock);
+  int64_t my_lsn = lsn++;
+  write_int(key, my_lsn, bl);
+  return my_lsn;
+}
+
+bool ZS_wal_logs::remove(const std::string &key)
+{
+  std::lock_guard<std::mutex> l(m_lock);
+  wal_key_to_seq.erase(key);
+  return true;
+}  
+
+bool ZS_wal_logs::is_wal_key(const std::string &key)
+{
+  if (key[0] == 'W') {
+    return true;
+  }
+  return false;
+}
+
+std::string ZS_wal_logs::wal_key_to_log_key(const std::string &key, int64_t seqno)
+{
+  return (std::to_string(seqno) + "_" + std::to_string(wal_log_pgid) + "_" + key);
+}
+
+std::string ZS_wal_logs::wal_log_key_to_key(const std::string &key, int64_t *seqno)
+{
+  int first_delim = key.find('_', 0);
+
+  std::string seq_str = key.substr(0, first_delim);
+
+  *seqno = stol(seq_str);
+  int second_delim = key.find('_', first_delim + 1);
+
+  return key.substr(second_delim + 1, string::npos);
+}
