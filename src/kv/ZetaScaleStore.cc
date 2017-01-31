@@ -626,6 +626,8 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
   std::vector<std::string> keys;
   ZS_obj_t objs[WRITE_BATCH_SIZE], objs_lc[WRITE_BATCH_SIZE];
   ZS_status_t status = ZS_SUCCESS;
+  std::vector<std::pair<std::string, bufferlist>> fm_log_ops;
+  std::vector<std::pair<std::string, bufferlist>> wal_log_ops;
   uint32_t i = 0, k = 0, l1 = 0, objs_written;
 
   dtrace << "ZSMPut count=" << ops.size() << dendl;
@@ -644,17 +646,11 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 	   << " " << length << dendl;
 
     if (op.first[0] == 'b') {
-      fm.write(op.first, op.second);
+      int ret = fm.write(op.first, op.second);
       if (g_conf->bluestore_zs_fm_opt_enabled) {
-        std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
-        /*
-         * Write the logging key to logging container for fm.
-         */
-        if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
-             (*fm_log_key).length(), ptr, length)) {
-          fm.unlock();
-          assert(0);
-          return -1;
+        fm_log_ops.push_back(std::make_pair(op.first, op.second));
+        if (ret == 1) {
+          fm_log_ops.clear();
         }
       }
       continue;
@@ -663,16 +659,10 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 
     std::string tmp_key = op.first;
     if (ZS_wal_logs::is_wal_key(tmp_key)) {
-      int64_t seq_no = wal_logs.write(tmp_key, op.second); // no need to read data from here
+      int64_t seq_no = wal_logs.write(tmp_key, op.second);
       std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(op.first, seq_no);
-      /*
-       * Write the logging key to logging container for fm.
-       */
-      if (!enqueue_obj(cguid_lc, objs_lc, &l1, wal_log_key.c_str(),
-           wal_log_key.length(), ptr, length)) {
-        assert(0);
-        return -1;
-      }
+      auto p = std::make_pair(wal_log_key, op.second);
+      wal_log_ops.push_back(p);
       continue;
     }
 
@@ -728,8 +718,40 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
   }
   if (!g_conf->bluestore_zs_fm_opt_enabled) {
     fm.flush();
+  } else {
+    for (const auto &fm_op : fm_log_ops) {
+      std::string *fm_log_key = fm.add_pending_fm_logs(fm_op.first);
+      bufferlist *o = (bufferlist *)&fm_op.second;
+      char *ptr = (char *)o->c_str();
+      unsigned int length = fm_op.second.length();
+	  	/*
+		   * Write the logging key to logging container for fm.
+		   */
+      if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
+		                   (*fm_log_key).length(), ptr, length)) {
+	      fm.unlock();
+	      assert(0);
+	      return -1;
+      }
+    }
+    fm_log_ops.clear();
   }
   fm.unlock();
+
+	for (const auto &op : wal_log_ops) {
+      /*
+       * Write the logging key to logging container for fm.
+       */
+    std::string *wal_log_key = (std::string *) &(op.first);
+		bufferlist *o = (bufferlist *)&op.second;
+		char *ptr = (char *)o->c_str();
+		unsigned int length = op.second.length();
+    if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*wal_log_key).c_str(),
+	                  (*wal_log_key).length(), ptr, length)) {
+      assert(0);
+      return -1;
+    }
+  }
 
   if (i) {
     for (uint32_t iter = 0; iter < i ; iter++) {
@@ -752,10 +774,6 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 
   if (status != ZS_SUCCESS)
     derr << "ZSMPut flush=" << ZSStrError(status) << dendl;
-
-
-
-
 
   return status == ZS_SUCCESS ? 0 : -1;
 }
@@ -1319,7 +1337,7 @@ int deserialize(char *buf, int ptr, bufferlist &data)
 void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
 {
 #define RECOVERY_BATCH_SIZE 32
-#define MAX_FM_LOGS 256
+#define MAX_FM_LOGS 512
   string key_end;
   ZS_range_meta_t meta;
   ZS_range_data_t values[RECOVERY_BATCH_SIZE];
@@ -1336,7 +1354,7 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
    */
   log_lsn_last = 3;
   log_lsn_first = 3;
-  pending_logs.resize(MAX_FM_LOGS, std::string("", 0));
+  pending_logs.reserve(MAX_FM_LOGS);
   
 
   dtrace << "freelist manager recovery" << dendl;
@@ -1492,14 +1510,15 @@ std::string* ZSFreeListManager::add_pending_fm_logs(const std::string key)
 std::string* ZSFreeListManager::add_pending_fm_logs_int(const std::string fm_key)
 {
   dtrace << "Adding FM log record fm_key = " << fm_key << dendl;
-  pending_logs[log_num_items] = fm_key; 
+  //pending_logs[log_num_items] = fm_key; 
+  pending_logs.push_back(fm_key); 
 
-  std::string * fm_keyp = &pending_logs[log_num_items];
-
+  std::string *fm_keyp = &pending_logs[log_num_items];
+      
   log_num_items++;
   log_lsn_last++;
 
-  assert(log_num_items < pending_logs.size());
+  assert(log_num_items == pending_logs.size());
   return fm_keyp;
 }
 
@@ -1513,6 +1532,8 @@ void ZSFreeListManager::trim_pending_fm_logs()
 
   assert(ret == ZS_SUCCESS);
 
+  pending_logs.clear();
+  pending_logs.reserve(MAX_FM_LOGS);
   log_lsn_first = log_lsn_last;
   log_num_items = 0;
 }
@@ -1640,6 +1661,7 @@ void ZSFreeListManager::flush()
 
 int ZSFreeListManager::write(const std::string &key, const bufferlist &data)
 {
+  int ret = 0;
   dtrace << "fm write key: " << decode_key(key) << " " << decode_data(data)
 	 << " Len:" << data.length() << dendl;
 
@@ -1651,6 +1673,7 @@ int ZSFreeListManager::write(const std::string &key, const bufferlist &data)
 
 		// trim whatever is pending so far 
     trim_pending_fm_logs();
+    ret = 1;
   }
 
   page_ptr = serialize(page, page_ptr, key.c_str(), key.length());
@@ -1660,7 +1683,7 @@ int ZSFreeListManager::write(const std::string &key, const bufferlist &data)
 	 << " page_ptr: " << page_ptr << dendl;
 
   log_ptr++;
-  return 0;
+  return ret;
 }
 
 bool ZSFreeListManager::seek(const std::string &key, bool inclusive)
