@@ -645,16 +645,18 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
 
     if (op.first[0] == 'b') {
       fm.write(op.first, op.second);
-			std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
-			/*
-			 * Write the logging key to logging container for fm.
-			 */
-			if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
-					 (*fm_log_key).length(), ptr, length)) {
-				fm.unlock();
-				assert(0);
-				return -1;
-			}
+      if (g_conf->bluestore_zs_fm_opt_enabled) {
+        std::string *fm_log_key = fm.add_pending_fm_logs(op.first);
+        /*
+         * Write the logging key to logging container for fm.
+         */
+        if (!enqueue_obj(cguid_lc, objs_lc, &l1, (*fm_log_key).c_str(),
+             (*fm_log_key).length(), ptr, length)) {
+          fm.unlock();
+          assert(0);
+          return -1;
+        }
+      }
       continue;
     }
 
@@ -724,7 +726,9 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
       }
     }
   }
-  //  fm.flush();
+  if (!g_conf->bluestore_zs_fm_opt_enabled) {
+    fm.flush();
+  }
   fm.unlock();
 
   if (i) {
@@ -1417,7 +1421,9 @@ void ZSFreeListManager::init(ZS_cguid_t _cguid_lc, ZS_cguid_t _cguid)
   /*
    * Patch entries ub fm logs. All entries are valid/idempotent here since we remove them once written to tree.
    */   
-	patch_fm_logs();
+  if (g_conf->bluestore_zs_fm_opt_enabled) { 
+    patch_fm_logs();
+  }
 
   ZS_status_t status1 = ZSGetRangeFinish(_thd_state(), cursor);
   if (status1 != ZS_SUCCESS)
