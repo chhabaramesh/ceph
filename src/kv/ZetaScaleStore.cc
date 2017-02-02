@@ -376,7 +376,9 @@ int ZSStore::do_open(ostream &out, int create)
   assert(dev_data_fd >= 0);
 
   fm.init(cguid_lc, cguid);
-  wal_logs.init(cguid_lc);
+  if (g_conf->bluestore_zs_wal_opt_enabled) {
+    wal_logs.init(cguid_lc);
+  }
 
   return 0;
 }
@@ -657,13 +659,15 @@ int ZSStore::_batch_set(const ZSStore::ZSMultiMap &ops)
     }
 
 
-    std::string tmp_key = op.first;
-    if (ZS_wal_logs::is_wal_key(tmp_key)) {
-      int64_t seq_no = wal_logs.write(tmp_key, op.second);
-      std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(op.first, seq_no);
-      auto p = std::make_pair(wal_log_key, op.second);
-      wal_log_ops.push_back(p);
-      continue;
+    if (g_conf->bluestore_zs_wal_opt_enabled) {
+      std::string tmp_key = op.first;
+      if (ZS_wal_logs::is_wal_key(tmp_key)) {
+        int64_t seq_no = wal_logs.write(tmp_key, op.second);
+        std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(op.first, seq_no);
+        auto p = std::make_pair(wal_log_key, op.second);
+        wal_log_ops.push_back(p);
+        continue;
+      }
     }
 
     bool lc = is_logging_prefixed(op.first);
@@ -879,7 +883,8 @@ int ZSStore::_rmkey(const std::string &_key)
   /*
    * Check for wal key first.
    */
-  if (ZS_wal_logs::is_wal_key(_key)) {
+  if (g_conf->bluestore_zs_wal_opt_enabled &&
+      ZS_wal_logs::is_wal_key(_key)) {
     int64_t seqno = wal_logs.get_seqno(_key);
     std::string wal_log_key = ZS_wal_logs::wal_key_to_log_key(_key, seqno);
 
@@ -924,7 +929,8 @@ int ZSStore::_get(const string &key, bufferlist *out)
     return 0;
   }
 
-  if (ZS_wal_logs::is_wal_key(key)) {
+  if (g_conf->bluestore_zs_wal_opt_enabled && 
+      ZS_wal_logs::is_wal_key(key)) {
     if (!wal_logs.read(key, out)) {
       assert(0);
       return -1;

@@ -1033,6 +1033,7 @@ OPTION(bluestore_compression_min_blob_size, OPT_U32, 128*1024)
 OPTION(bluestore_compression_max_blob_size, OPT_U32, 512*1024)
 OPTION(bluestore_max_blob_size, OPT_U32, 512*1024)
 OPTION(bluestore_zs_fm_opt_enabled, OPT_BOOL, true)
+OPTION(bluestore_zs_wal_opt_enabled, OPT_BOOL, true)
 /*
  * Require the net gain of compression at least to be at this ratio,
  * otherwise we don't compress.
