@@ -86,14 +86,14 @@ class ZSFreeListManager
 
 class ZS_wal_logs {
   std::mutex m_lock;
-  int64_t lsn = 0;
+  int64_t lsn = 3;
   ZS_cguid_t wal_log_cont_id = -1;
   std::map<std::string, std::pair<int64_t, bufferlist>> wal_key_to_seq;
 
 public:
   static int64_t wal_log_pgid;
   ZS_wal_logs() {
-    lsn = 0;
+    lsn = 3;
   }
 
   void init(ZS_cguid_t cguid);

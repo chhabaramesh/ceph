@@ -1801,6 +1801,7 @@ void ZS_wal_logs::write_int(std::string &key, int64_t seq, bufferlist bl)
 int64_t ZS_wal_logs::write(std::string &key, bufferlist bl)
 {
   std::lock_guard<std::mutex> l(m_lock);
+  dtrace << "WAL log write key: " << "Key len :" << key.length() <<decode_key(key) <<  " Data Len:" << bl.length() << dendl;
   int64_t my_lsn = lsn++;
   write_int(key, my_lsn, bl);
   return my_lsn;
@@ -1809,13 +1810,14 @@ int64_t ZS_wal_logs::write(std::string &key, bufferlist bl)
 bool ZS_wal_logs::remove(const std::string &key)
 {
   std::lock_guard<std::mutex> l(m_lock);
+  dtrace << "WAL log remove key: " << "Key len :" << key.length() <<decode_key(key) << dendl;
   wal_key_to_seq.erase(key);
   return true;
 }  
 
 bool ZS_wal_logs::is_wal_key(const std::string &key)
 {
-  if (key[0] == 'W') {
+  if (key[0] == 'L') {
     return true;
   }
   return false;
